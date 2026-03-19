@@ -15,7 +15,6 @@ import {
   X,
   ShieldCheck,
   Bell,
-  User,
   ChevronDown,
 } from 'lucide-react'
 import { useAuthStore, selectIsSuperAdmin } from '@/store/auth-store'

@@ -93,18 +93,6 @@ const ChartTooltip = ({ active, payload, label }: {
   )
 }
 
-// ─── Section label ─────────────────────────────────────────────────────────────
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[10px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'var(--text-muted)' }}>
-      {children}
-    </p>
-  )
-}
-
-// ─── Page ──────────────────────────────────────────────────────────────────────
-
 export default function OverviewPage() {
   const { data: stats,       isLoading: statsLoading   } = useTransactionStats()
   const { data: recentPage,  isLoading: recentLoading  } = useTransactions({ size: 8, sort: 'createdAt,desc' })
