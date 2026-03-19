@@ -1,0 +1,493 @@
+
+# =============================================================================
+# Blockchain Banking Security System — Docker Compose
+# =============================================================================
+
+networks:
+  bbss-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  grafana_data:
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure: PostgreSQL
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: bbss-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure: Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7.2-alpine
+    container_name: bbss-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure: Zookeeper
+  # ---------------------------------------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: bbss-zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure: Apache Kafka
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: bbss-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure: Kafka Topic Initialization
+  # ---------------------------------------------------------------------------
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: bbss-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      echo 'Creating Kafka topics...'
+      # Primary topics
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tx.submitted       --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tx.verified        --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tx.blocked         --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic fraud.alert        --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.entry        --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tenant.provisioned --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic block.committed    --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic auth.user.registered --replication-factor 1 --partitions 1
+      
+      # Dead Letter Topics (DLT) - Phase 1.5: Kafka Reliability
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic fraud.alert.dlt    --replication-factor 1 --partitions 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.entry.dlt    --replication-factor 1 --partitions 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tx.verified.dlt    --replication-factor 1 --partitions 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tx.blocked.dlt     --replication-factor 1 --partitions 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic block.committed.dlt --replication-factor 1 --partitions 1 --config retention.ms=604800000
+      
+      echo 'All Kafka topics (including DLTs) created successfully.'
+      kafka-topics --bootstrap-server kafka:9092 --list
+      "
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Observability: Jaeger (Distributed Tracing)
+  # UI: http://localhost:16686
+  # Collector: http://localhost:14268
+  # ---------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: bbss-jaeger
+    restart: unless-stopped
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector (HTTP)
+      - "14250:14250"  # Jaeger collector (gRPC, for agents)
+      - "9411:9411"    # Zipkin compatible endpoint (HTTP)
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: ":9411"
+      COLLECTOR_OTLP_ENABLED: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:14269/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Backend: Auth Service (Spring Boot, port 8081)
+  # Build context: ./backend  (Dockerfile references shared/ and auth-service/)
+  # ---------------------------------------------------------------------------
+  auth-service:
+    build:
+      context: ./backend
+      dockerfile: auth-service/Dockerfile
+    container_name: bbss-auth-service
+    restart: unless-stopped
+    ports:
+      - "${AUTH_SERVICE_PORT:-8081}:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bbss_auth
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS}
+      JWT_REFRESH_EXPIRATION_MS: ${JWT_REFRESH_EXPIRATION_MS}
+      SERVER_PORT: 8081
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Backend: Tenant Service (Spring Boot, port 8082)
+  # ---------------------------------------------------------------------------
+  tenant-service:
+    build:
+      context: ./backend
+      dockerfile: tenant-service/Dockerfile
+    container_name: bbss-tenant-service
+    restart: unless-stopped
+    ports:
+      - "${TENANT_SERVICE_PORT:-8082}:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bbss_tenant
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      SERVER_PORT: 8082
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8082/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Backend: Blockchain Service (Spring Boot, port 8084)
+  # Note: Hyperledger Fabric integration is skipped until fabric-up is run.
+  # ---------------------------------------------------------------------------
+  blockchain-service:
+    build:
+      context: ./backend
+      dockerfile: blockchain-service/Dockerfile
+    container_name: bbss-blockchain-service
+    restart: unless-stopped
+    ports:
+      - "${BLOCKCHAIN_SERVICE_PORT:-8084}:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: bbss_blockchain
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      FABRIC_NETWORK_NAME: ${FABRIC_NETWORK_NAME}
+      FABRIC_CHANNEL_NAME: ${FABRIC_CHANNEL_NAME}
+      FABRIC_CHAINCODE_TRANSACTION: ${FABRIC_CHAINCODE_TRANSACTION}
+      FABRIC_CHAINCODE_AUDIT: ${FABRIC_CHAINCODE_AUDIT}
+      FABRIC_PEER_ENDPOINT: "peer0.org1.example.com:7051"
+      FABRIC_MSP_ID: "Org1MSP"
+      FABRIC_SKIP_CONNECT: "true"
+      JWT_SECRET: ${JWT_SECRET}
+      SERVER_PORT: 8084
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8084/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Backend: Transaction Service (Spring Boot, port 8083)
+  # ---------------------------------------------------------------------------
+  transaction-service:
+    build:
+      context: ./backend
+      dockerfile: transaction-service/Dockerfile
+    container_name: bbss-transaction-service
+    restart: unless-stopped
+    ports:
+      - "${TRANSACTION_SERVICE_PORT:-8083}:8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      blockchain-service:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bbss_transaction
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET}
+      BLOCKCHAIN_SERVICE_URL: http://blockchain-service:8084
+      FRAUD_SERVICE_URL: http://fraud-detection:8000
+      SERVER_PORT: 8083
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8083/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Backend: Audit Service (Spring Boot, port 8085)
+  # ---------------------------------------------------------------------------
+  audit-service:
+    build:
+      context: ./backend
+      dockerfile: audit-service/Dockerfile
+    container_name: bbss-audit-service
+    restart: unless-stopped
+    ports:
+      - "${AUDIT_SERVICE_PORT:-8085}:8085"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bbss_audit
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      BLOCKCHAIN_SERVICE_URL: http://blockchain-service:8084
+      JWT_SECRET: ${JWT_SECRET}
+      SERVER_PORT: 8085
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8085/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # ML: Fraud Detection Service (Python / FastAPI, port 8000)
+  # ---------------------------------------------------------------------------
+  fraud-detection:
+    build:
+      context: ./fraud-detection
+      dockerfile: Dockerfile
+    container_name: bbss-fraud-detection
+    restart: unless-stopped
+    ports:
+      - "${FRAUD_SERVICE_PORT:-8000}:8000"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/bbss_fraud
+      JWT_SECRET: ${JWT_SECRET}
+      APP_PORT: 8000
+      FRAUD_SCORE_THRESHOLD_BLOCK: 0.90
+      FRAUD_SCORE_THRESHOLD_HOLD: 0.75
+      UNUSUAL_HOUR_START: 3
+      UNUSUAL_HOUR_END: 5
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Backend: API Gateway (Spring Cloud Gateway, port 8080)
+  # ---------------------------------------------------------------------------
+  api-gateway:
+    build:
+      context: ./backend
+      dockerfile: api-gateway/Dockerfile
+    container_name: bbss-api-gateway
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      tenant-service:
+        condition: service_healthy
+      transaction-service:
+        condition: service_healthy
+      blockchain-service:
+        condition: service_healthy
+      audit-service:
+        condition: service_healthy
+      fraud-detection:
+        condition: service_healthy
+    environment:
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      SERVER_PORT: 8080
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Frontend: Next.js Dashboard (port 3000)
+  # ---------------------------------------------------------------------------
+  dashboard:
+    build:
+      context: ./frontend/dashboard
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+    container_name: bbss-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api-gateway
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+      NODE_ENV: production
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Observability: Prometheus (port 9090)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: bbss-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
+    networks:
+      - bbss-network
+
+  # ---------------------------------------------------------------------------
+  # Observability: Grafana (port 3001)
+  # UI: http://localhost:3001
+  # Credentials: admin / ${GRAFANA_PASSWORD}
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.3.0
+    container_name: bbss-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_INSTALL_PLUGINS: ""
+    volumes:
+      # Grafana persistent data
+      - grafana_data:/var/lib/grafana
+      # Datasource provisioning (auto-configure Prometheus)
+      - ./infrastructure/monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      # Dashboard provisioning (auto-import JSON dashboards)
+      - ./infrastructure/monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./infrastructure/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - bbss-network

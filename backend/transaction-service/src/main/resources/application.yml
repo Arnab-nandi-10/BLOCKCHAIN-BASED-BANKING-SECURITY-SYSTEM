@@ -1,0 +1,178 @@
+server:
+  port: 8083
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: transaction-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:bbss_transaction}
+    username: ${DB_USERNAME:bbss_user}
+    password: ${DB_PASSWORD:bbss_pass}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: transaction-service-pool
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: public
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    schemas: public
+    table: flyway_schema_history_transaction
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: true
+        acks: all
+        retries: 3
+        retry.backoff.ms: 1000
+        enable.idempotence: true
+    consumer:
+      group-id: transaction-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        spring.json.trusted.packages: "com.bbss.*"
+    listener:
+      ack-mode: manual_immediate
+      concurrency: 3
+
+# Downstream service URLs
+services:
+  fraud-detection:
+    url: ${FRAUD_SERVICE_URL:http://fraud-detection:8000}
+  blockchain-service:
+    url: ${BLOCKCHAIN_SERVICE_URL:http://blockchain-service:8084}
+
+# Feign client configuration
+feign:
+  client:
+    config:
+      fraud-detection:
+        connect-timeout: 5000
+        read-timeout: 10000
+        logger-level: basic
+      blockchain-service:
+        connect-timeout: 5000
+        read-timeout: 30000
+        logger-level: basic
+  circuitbreaker:
+    enabled: true
+
+# Resilience4j circuit breaker configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      fraud-service:
+        register-health-indicator: true
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        wait-duration-in-open-state: 10s
+        failure-rate-threshold: 50
+        slow-call-rate-threshold: 100
+        slow-call-duration-threshold: 8s
+        record-exceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+          - feign.FeignException
+      blockchain-service:
+        register-health-indicator: true
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        wait-duration-in-open-state: 30s
+        failure-rate-threshold: 50
+        slow-call-rate-threshold: 100
+        slow-call-duration-threshold: 25s
+        record-exceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+          - feign.FeignException
+  timelimiter:
+    instances:
+      fraud-service:
+        timeout-duration: 10s
+      blockchain-service:
+        timeout-duration: 30s
+
+# Security
+security:
+  jwt:
+    secret: ${JWT_SECRET:YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY3ODkwYWJjZGVmZ2hpamtsbW5vcHFyc3Q=}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+
+# Spring Boot Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,circuitbreakers,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+  metrics:
+    tags:
+      application: transaction-service
+      service: transaction-service
+      environment: ${ENVIRONMENT:development}
+  tracing:
+    sampling:
+      probability: 1.0  # 100% trace sampling for development
+  zipkin:
+    base-url: ${ZIPKIN_BASE_URL:http://jaeger:9411}
+    tracing:
+      endpoint: ${ZIPKIN_BASE_URL:http://jaeger:9411}/api/v2/spans
+
+# SpringDoc OpenAPI
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+logging:
+  level:
+    com.bbss.transaction: INFO
+    org.springframework.kafka: WARN
+    org.hibernate.SQL: WARN
+    feign: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId}/%X{spanId}] [%X{tenantId}] [%X{txId}] %logger{36} - %msg%n"

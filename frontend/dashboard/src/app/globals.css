@@ -1,0 +1,343 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ══════════════════════════════════════════════════════════════════════
+     Modern SaaS Design System — Blockchain Banking Security System
+     Inspired by: Stripe, Vercel, Linear, Cloudflare
+     ══════════════════════════════════════════════════════════════════════ */
+
+  /* ── Light Theme (Default) ────────────────────────────────────────────── */
+  :root {
+    /* Layout */
+    --sidebar-width:  260px;
+    --top-nav-height: 64px;
+
+    /* Base Colors — Calm Fintech Palette */
+    --bg-base:       #F8FAFC;    /* slate-50 */
+    --bg-body:       #F8FAFC;    /* alias for base */
+    --bg-surface:    #FFFFFF;    /* white */
+    --bg-subtle:     #F1F5F9;    /* slate-100 */
+    --bg-elevated:   #FFFFFF;    /* white */
+    --bg-overlay:    rgba(15, 23, 42, 0.4);
+
+    /* Borders */
+    --border:        #E5E7EB;    /* Clean, minimal borders */
+    --border-subtle: #F3F4F6;
+    --border-strong: #D1D5DB;
+
+    /* Text Hierarchy */
+    --text-primary:   #0F172A;   /* slate-900 - Headings, important text */
+    --text-secondary: #64748B;   /* slate-500 - Body text */
+    --text-tertiary:  #94A3B8;   /* slate-400 - Muted text */
+    --text-muted:     #94A3B8;   /* alias for tertiary */
+    --text-disabled:  #CBD5E1;   /* slate-300 */
+
+    /* Brand Colors */
+    --color-primary:        #2563EB;  /* primary-600 */
+    --color-primary-hover:  #1D4ED8;  /* primary-700 */
+    --color-primary-light:  #EFF6FF;  /* primary-50 */
+    --color-primary-border: #BFDBFE;  /* blue-200 */
+    --color-primary-ring:   rgba(37, 99, 235, 0.2);
+    --color-primary-fg:     #FFFFFF;
+
+    /* Status Colors */
+    --color-success:        #22C55E;
+    --color-success-light:  #F0FDF4;
+    --color-success-border: #BBF7D0;
+
+    --color-warning:        #F59E0B;
+    --color-warning-light:  #FFFBEB;
+    --color-warning-border: #FDE68A;
+
+    --color-error:          #EF4444;
+    --color-error-light:    #FEF2F2;
+    --color-error-border:   #FECACA;
+
+    /* Component Surfaces */
+    --sidebar-bg:      #FFFFFF;
+    --sidebar-border:  #E5E7EB;
+    --sidebar-hover:   #F8FAFC;
+    --sidebar-active:  #EFF6FF;
+
+    --topnav-bg:       rgba(255, 255, 255, 0.8);
+    --topnav-border:   #E5E7EB;
+    --header-bg:       rgba(255, 255, 255, 0.9);
+    --header-border:   #E5E7EB;
+
+    /* Interactive States */
+    --hover-bg:        #F8FAFC;
+    --focus-ring:      rgba(37, 99, 235, 0.2);
+    --transition-fast: 150ms ease;
+
+    /* Data Visualization */
+    --chart-blue:      #2563EB;
+    --chart-emerald:   #10B981;
+    --chart-amber:     #F59E0B;
+    --chart-rose:      #F43F5E;
+    --chart-violet:    #8B5CF6;
+    --chart-cyan:      #06B6D4;
+
+    /* Shadows — Minimal, modern approach */
+    --shadow-sm:  0 1px 2px 0 rgba(0, 0, 0, 0.03);
+    --shadow-md:  0 1px 3px 0 rgba(0, 0, 0, 0.05);
+    --shadow-lg:  0 4px 6px -1px rgba(0, 0, 0, 0.04);
+  }
+
+  /* ── Dark Theme ──────────────────────────────────────────────────────── */
+  .dark {
+    --bg-base:       #0F172A;    /* slate-900 */
+    --bg-body:       #0F172A;
+    --bg-surface:    #1E293B;    /* slate-800 */
+    --bg-subtle:     #334155;    /* slate-700 */
+    --bg-elevated:   #1E293B;    /* slate-800 */
+    --bg-overlay:    rgba(0, 0, 0, 0.6);
+
+    --border:        rgba(148, 163, 184, 0.1);
+    --border-subtle: rgba(148, 163, 184, 0.05);
+    --border-strong: rgba(148, 163, 184, 0.2);
+
+    --text-primary:   #F1F5F9;
+    --text-secondary: #94A3B8;
+    --text-tertiary:  #64748B;
+    --text-muted:     #64748B;
+    --text-disabled:  #475569;
+
+    --color-primary:        #3B82F6;
+    --color-primary-hover:  #60A5FA;
+    --color-primary-light:  rgba(59, 130, 246, 0.1);
+    --color-primary-border: rgba(59, 130, 246, 0.3);
+    --color-primary-ring:   rgba(59, 130, 246, 0.25);
+    --color-primary-fg:     #FFFFFF;
+
+    --color-success:        #22C55E;
+    --color-success-light:  rgba(34, 197, 94, 0.1);
+    --color-success-border: rgba(34, 197, 94, 0.2);
+
+    --color-warning:        #F59E0B;
+    --color-warning-light:  rgba(245, 158, 11, 0.1);
+    --color-warning-border: rgba(245, 158, 11, 0.2);
+
+    --color-error:          #EF4444;
+    --color-error-light:    rgba(239, 68, 68, 0.1);
+    --color-error-border:   rgba(239, 68, 68, 0.2);
+
+    --sidebar-bg:      #0B1120;
+    --sidebar-border:  rgba(148, 163, 184, 0.1);
+    --sidebar-hover:   rgba(148, 163, 184, 0.05);
+    --sidebar-active:  rgba(59, 130, 246, 0.1);
+
+    --topnav-bg:       rgba(15, 23, 42, 0.8);
+    --topnav-border:   rgba(148, 163, 184, 0.1);
+    --header-bg:       rgba(15, 23, 42, 0.9);
+    --header-border:   rgba(148, 163, 184, 0.1);
+
+    --hover-bg:        rgba(148, 163, 184, 0.05);
+    --focus-ring:      rgba(59, 130, 246, 0.3);
+    --transition-fast: 150ms ease;
+
+    --chart-blue:      #3B82F6;
+    --chart-emerald:   #10B981;
+    --chart-amber:     #FBBF24;
+    --chart-rose:      #FB7185;
+    --chart-violet:    #A78BFA;
+    --chart-cyan:      #22D3EE;
+
+    --shadow-sm:  0 1px 2px 0 rgba(0, 0, 0, 0.3);
+    --shadow-md:  0 1px 3px 0 rgba(0, 0, 0, 0.4);
+    --shadow-lg:  0 4px 6px -1px rgba(0, 0, 0, 0.5);
+  }
+
+  /* ── Base Styles ──────────────────────────────────────────────────────── */
+  html {
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'cv11', 'ss01';
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--bg-body);
+    background-image:
+      radial-gradient(ellipse at 85% 0%, rgba(59,130,246,0.06) 0px, transparent 45%),
+      radial-gradient(ellipse at -5% 95%, rgba(139,92,246,0.05) 0px, transparent 45%);
+    background-attachment: fixed;
+    color: var(--text-primary);
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  * { box-sizing: border-box; }
+
+  ::selection {
+    background: var(--color-primary-ring);
+    color: var(--color-primary);
+  }
+
+  ::-webkit-scrollbar       { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+}
+
+@layer components {
+  /* ── Card / Panel ───────────────────────────────────────────────────────── */
+  .card {
+    @apply rounded-2xl;
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    transition: background-color 0.25s ease, border-color 0.25s ease;
+  }
+
+  .panel {
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+    transition: background-color 0.25s ease, border-color 0.25s ease;
+  }
+
+  /* ── Input base ─────────────────────────────────────────────────────────── */
+  .input-base {
+    @apply w-full rounded-xl border px-3.5 py-2.5 text-sm outline-none;
+    color: var(--text-primary);
+    background-color: var(--bg-surface);
+    border-color: var(--border);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+                background-color 0.25s ease;
+  }
+  .input-base::placeholder { color: var(--text-muted); }
+  .input-base:hover         { border-color: var(--border-strong); }
+  .input-base:focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-ring);
+  }
+
+  /* ── Buttons ────────────────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium outline-none select-none;
+    transition: all var(--transition-fast);
+  }
+  .btn-primary {
+    @apply btn text-white;
+    background-color: var(--color-primary);
+  }
+  .btn-primary:hover    { background-color: var(--color-primary-hover); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-secondary {
+    @apply btn;
+    color: var(--text-secondary);
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover {
+    background-color: var(--bg-subtle);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+  }
+  .btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── Skeleton loader ─────────────────────────────────────────────────────── */
+  .skeleton {
+    @apply rounded-lg;
+    background: linear-gradient(
+      90deg,
+      var(--bg-subtle) 25%,
+      var(--border) 50%,
+      var(--bg-subtle) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s ease-in-out infinite;
+  }
+
+  /* ── Live status dot ────────────────────────────────────────────────────── */
+  .dot-live {
+    @apply inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full;
+    background-color: var(--color-success);
+    animation: livePulse 2.5s ease-in-out infinite;
+  }
+
+  /* ── Table styles ──────────────────────────────────────────────────────── */
+  .data-table { @apply w-full text-sm; }
+  .data-table thead tr {
+    background-color: var(--bg-subtle);
+    border-bottom: 1px solid var(--border);
+  }
+  .data-table thead th {
+    @apply whitespace-nowrap px-4 py-3 text-left text-[11px] font-semibold uppercase tracking-wider;
+    color: var(--text-muted);
+  }
+  .data-table tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background var(--transition-fast);
+  }
+  .data-table tbody tr:hover  { background-color: var(--bg-subtle); }
+  .data-table tbody tr:last-child { border-bottom: none; }
+  .data-table tbody td {
+    @apply px-4 py-3;
+    color: var(--text-secondary);
+  }
+}
+
+@layer utilities {
+  .animate-fade-in       { animation: fadeIn     0.3s  ease-out both; }
+  .animate-slide-up      { animation: slideUp    0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .animate-slide-in-left { animation: slideInLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .animate-scale-in      { animation: scaleIn    0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+}
+
+/* ── Keyframes ───────────────────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+
+
+/* ── Keyframes ────────────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}

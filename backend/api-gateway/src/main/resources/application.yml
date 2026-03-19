@@ -1,0 +1,66 @@
+spring:
+  main:
+    web-application-type: reactive
+  application:
+    name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  cloud:
+    gateway:
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin RETAIN_FIRST
+      discovery:
+        locator:
+          enabled: false
+      # Preserve Authorization header when routing to downstream services
+      sensitive-headers:
+
+jwt:
+  secret: ${JWT_SECRET:YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY3ODkwYWJjZGVmZ2hpamtsbW5vcHFyc3Q=}
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,gateway
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: api-gateway
+      service: api-gateway
+      environment: ${ENVIRONMENT:development}
+  tracing:
+    sampling:
+      probability: 1.0  # 100% trace sampling for development
+  zipkin:
+    base-url: ${ZIPKIN_BASE_URL:http://jaeger:9411}
+    tracing:
+      endpoint: ${ZIPKIN_BASE_URL:http://jaeger:9411}/api/v2/spans
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      auth-service:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 3
+      default:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+
+logging:
+  level:
+    com.bbss.gateway: DEBUG
+    org.springframework.cloud.gateway: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId}/%X{spanId}] %logger{36} - %msg%n"

@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# crypto-config.yaml — Hyperledger Fabric cryptographic material specification
+#
+# Used by the `cryptogen` tool to generate TLS certificates, signing
+# certificates, and MSP directories for all orderer and peer nodes in the
+# BBSS (Blockchain Banking Security System) network.
+#
+# Run:
+#   cryptogen generate --config=config/crypto-config.yaml \
+#                      --output=organizations
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# OrdererOrgs — certificate authority and node identities for orderer nodes
+# ---------------------------------------------------------------------------
+OrdererOrgs:
+
+  - Name: Orderer
+    Domain: orderer.bbss.com
+
+    # EnableNodeOUs enables distinction of admin/peer/client/orderer roles
+    # within the MSP using OU-based certificates.
+    EnableNodeOUs: true
+
+    # Specs defines the specific hostnames for orderer nodes.
+    # The full FQDN will be <Hostname>.<Domain>.
+    Specs:
+      - Hostname: orderer
+
+# ---------------------------------------------------------------------------
+# PeerOrgs — certificate authority and node identities for peer organisations
+# ---------------------------------------------------------------------------
+PeerOrgs:
+
+  # ---------------------------------------------------------------------------
+  # Org1 — Bank Alpha
+  # Domain:  org1.bbss.com
+  # Peers:   peer0.org1.bbss.com  (port 7051)
+  #          peer1.org1.bbss.com  (port 8051)
+  # Users:   1 additional non-admin user (User1@org1.bbss.com)
+  # ---------------------------------------------------------------------------
+  - Name: Org1
+    Domain: org1.bbss.com
+    EnableNodeOUs: true
+
+    # Template generates peer node certificates automatically.
+    # Count: 2 produces peer0 and peer1.
+    Template:
+      Count: 2
+
+    # Users.Count specifies the number of non-admin user certificates to
+    # generate in addition to the default Admin user.
+    Users:
+      Count: 1
+
+  # ---------------------------------------------------------------------------
+  # Org2 — Bank Beta
+  # Domain:  org2.bbss.com
+  # Peers:   peer0.org2.bbss.com  (port 9051)
+  #          peer1.org2.bbss.com  (port 10051)
+  # Users:   1 additional non-admin user (User1@org2.bbss.com)
+  # ---------------------------------------------------------------------------
+  - Name: Org2
+    Domain: org2.bbss.com
+    EnableNodeOUs: true
+
+    Template:
+      Count: 2
+
+    Users:
+      Count: 1

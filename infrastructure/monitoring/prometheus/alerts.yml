@@ -1,0 +1,345 @@
+# =============================================================================
+# Blockchain Banking Security System — Prometheus Alert Rules
+# =============================================================================
+# Production-grade alerting rules for monitoring service health, performance,
+# and reliability. These alerts enable proactive detection of issues before
+# they impact end users.
+#
+# Alert Severity Levels:
+# - critical: Immediate action required, service degraded or unavailable
+# - warning:  Potential issue detected, investigate soon
+# - info:     Informational, for awareness and trending
+# =============================================================================
+
+groups:
+  # ===========================================================================
+  # Service Health & Availability Alerts
+  # ===========================================================================
+  - name: service_health
+    interval: 30s
+    rules:
+      # Service is down (no metrics scraped for 2 minutes)
+      - alert: ServiceDown
+        expr: up{job=~".*-service|api-gateway|fraud-detection"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.job }} on instance {{ $labels.instance }} has been down for more than 2 minutes."
+          runbook: "Check container logs: docker logs bbss-{{ $labels.service }}. Verify dependencies (PostgreSQL, Kafka, Redis) are healthy."
+
+      # Service health endpoint reports unhealthy
+      - alert: ServiceUnhealthy
+        expr: health_status_indicator{name!~"diskSpace|ping"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: health
+        annotations:
+          summary: "Service {{ $labels.job }} health check failing"
+          description: "Health indicator '{{ $labels.name }}' for {{ $labels.job }} is reporting unhealthy status."
+          runbook: "Check health endpoint: curl http://{{ $labels.instance }}/actuator/health. Investigate specific component: {{ $labels.name }}."
+
+      # Database connectivity issues
+      - alert: DatabaseHealthCheckFailing
+        expr: health_component_status{component="database"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Database health check failing for {{ $labels.job }}"
+          description: "Service {{ $labels.job }} cannot connect to PostgreSQL database."
+          runbook: "Verify PostgreSQL is running: docker ps | grep postgres. Check database logs: docker logs bbss-postgres."
+
+      # Kafka connectivity issues
+      - alert: KafkaHealthCheckFailing
+        expr: health_component_status{component="kafka"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          category: kafka
+        annotations:
+          summary: "Kafka health check failing for {{ $labels.job }}"
+          description: "Service {{ $labels.job }} cannot connect to Kafka cluster."
+          runbook: "Verify Kafka is running: docker ps | grep kafka. Check Kafka logs: docker logs bbss-kafka."
+
+      # Fabric Gateway connectivity issues (blockchain-service only)
+      - alert: FabricGatewayHealthCheckFailing
+        expr: health_component_status{component="fabricGateway"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          category: blockchain
+        annotations:
+          summary: "Hyperledger Fabric Gateway health check failing"
+          description: "Blockchain service cannot connect to Hyperledger Fabric network."
+          runbook: "If Fabric network is expected to be running, check: ./blockchain/network/scripts/status.sh. Verify FABRIC_SKIP_CONNECT is not set to 'true'."
+
+  # ===========================================================================
+  # Circuit Breaker & Fault Tolerance Alerts
+  # ===========================================================================
+  - name: circuit_breakers
+    interval: 30s
+    rules:
+      # Circuit breaker open for extended period
+      - alert: CircuitBreakerOpenTooLong
+        expr: |
+          resilience4j_circuitbreaker_state{state="open"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          category: fault_tolerance
+        annotations:
+          summary: "Circuit breaker {{ $labels.name }} open for > 5 minutes"
+          description: "Circuit breaker '{{ $labels.name }}' in service {{ $labels.job }} has been open for more than 5 minutes, indicating persistent downstream failures."
+          runbook: "Check downstream service health. Review error logs for {{ $labels.job }}. Consider manual intervention if downstream service is healthy but circuit not recovering."
+
+      # High circuit breaker failure rate
+      - alert: HighCircuitBreakerFailureRate
+        expr: |
+          rate(resilience4j_circuitbreaker_calls_seconds_count{kind="failed"}[5m]) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          category: fault_tolerance
+        annotations:
+          summary: "High failure rate for circuit breaker {{ $labels.name }}"
+          description: "Circuit breaker '{{ $labels.name }}' in {{ $labels.job }} is experiencing > 50% failure rate."
+          runbook: "Investigate downstream service {{ $labels.name }}. Check for network issues, timeouts, or service degradation."
+
+  # ===========================================================================
+  # Database Connection Pool Alerts
+  # ===========================================================================
+  - name: database_connection_pool
+    interval: 30s
+    rules:
+      # Connection pool exhausted
+      - alert: DatabaseConnectionPoolExhausted
+        expr: |
+          hikaricp_connections_active / hikaricp_connections_max > 0.95
+        for: 1m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Database connection pool nearly exhausted for {{ $labels.job }}"
+          description: "Service {{ $labels.job }} is using {{ $value | humanizePercentage }} of available database connections."
+          runbook: "Investigate long-running queries. Check for connection leaks. Consider increasing pool size or optimizing queries."
+
+      # High connection acquisition wait time
+      - alert: HighConnectionAcquisitionWaitTime
+        expr: |
+          hikaricp_connections_acquire_seconds_sum / hikaricp_connections_acquire_seconds_count > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          category: database
+        annotations:
+          summary: "High database connection acquisition wait time for {{ $labels.job }}"
+          description: "Service {{ $labels.job }} is experiencing average connection wait time > 500ms."
+          runbook: "Check database load. Review slow queries. Consider connection pool tuning."
+
+  # ===========================================================================
+  # Kafka Consumer Lag Alerts
+  # ===========================================================================
+  - name: kafka_consumer_lag
+    interval: 30s
+    rules:
+      # High consumer lag
+      - alert: HighKafkaConsumerLag
+        expr: |
+          kafka_consumer_fetch_manager_records_lag_max > 1000
+        for: 5m
+        labels:
+          severity: warning
+          category: kafka
+        annotations:
+          summary: "High Kafka consumer lag for {{ $labels.job }}"
+          description: "Consumer {{ $labels.client_id }} ({{ $labels.job }}) has lag > 1000 messages on topic {{ $labels.topic }}."
+          runbook: "Check consumer processing speed. Verify consumer is not stuck. Consider scaling consumers or optimizing processing logic."
+
+      # Consumer lag increasing
+      - alert: KafkaConsumerLagIncreasing
+        expr: |
+          (
+            kafka_consumer_fetch_manager_records_lag_max 
+            - 
+            kafka_consumer_fetch_manager_records_lag_max offset 5m
+          ) > 500
+        for: 5m
+        labels:
+          severity: warning
+          category: kafka
+        annotations:
+          summary: "Kafka consumer lag increasing for {{ $labels.job }}"
+          description: "Consumer lag for {{ $labels.job }} has increased by > 500 messages in the last 5 minutes."
+          runbook: "Producer may be publishing faster than consumer can process. Check consumer throughput and error rate."
+
+  # ===========================================================================
+  # Application Performance Alerts
+  # ===========================================================================
+  - name: application_performance
+    interval: 30s
+    rules:
+      # High error rate for HTTP endpoints
+      - alert: HighHTTPErrorRate
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) by (job, uri)
+            /
+            sum(rate(http_server_requests_seconds_count[5m])) by (job, uri)
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High error rate (> 5%) for {{ $labels.job }}{{ $labels.uri }}"
+          description: "Endpoint {{ $labels.uri }} in {{ $labels.job }} is returning {{ $value | humanizePercentage }} server errors (5xx)."
+          runbook: "Check application logs for exceptions. Review endpoint {{ $labels.uri }} for bugs or resource issues."
+
+      # High latency for HTTP endpoints
+      - alert: HighHTTPLatency
+        expr: |
+          histogram_quantile(0.99, 
+            sum(rate(http_server_requests_seconds_bucket[5m])) by (job, uri, le)
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High latency (p99 > 5s) for {{ $labels.job }}{{ $labels.uri }}"
+          description: "99th percentile latency for {{ $labels.uri }} in {{ $labels.job }} is {{ $value }}s."
+          runbook: "Review slow queries or external API calls. Check database performance. Consider caching or optimization."
+
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: |
+          process_cpu_usage > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High CPU usage for {{ $labels.job }}"
+          description: "Service {{ $labels.job }} is using > 80% CPU for extended period."
+          runbook: "Check for infinite loops, inefficient algorithms, or resource-intensive operations. Consider profiling the application."
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: |
+          jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High heap memory usage for {{ $labels.job }}"
+          description: "Service {{ $labels.job }} is using > 85% of heap memory."
+          runbook: "Check for memory leaks. Review heap dump if available. Consider increasing heap size or optimizing memory usage."
+
+  # ===========================================================================
+  # JVM & Garbage Collection Alerts
+  # ===========================================================================
+  - name: jvm_health
+    interval: 30s
+    rules:
+      # Frequent garbage collection
+      - alert: FrequentGarbageCollection
+        expr: |
+          rate(jvm_gc_pause_seconds_count[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          category: jvm
+        annotations:
+          summary: "Frequent garbage collection in {{ $labels.job }}"
+          description: "Service {{ $labels.job }} is experiencing > 1 GC event per second."
+          runbook: "Review heap size configuration. Check for memory leaks or excessive object allocation."
+
+      # Long GC pauses
+      - alert: LongGarbageCollectionPause
+        expr: |
+          jvm_gc_pause_seconds_max > 1
+        for: 1m
+        labels:
+          severity: warning
+          category: jvm
+        annotations:
+          summary: "Long GC pause detected in {{ $labels.job }}"
+          description: "Service {{ $labels.job }} experienced GC pause > 1 second."
+          runbook: "Review GC logs. Consider tuning GC parameters or increasing heap size."
+
+  # ===========================================================================
+  # Fraud Detection Specific Alerts
+  # ===========================================================================
+  - name: fraud_detection
+    interval: 30s
+    rules:
+      # High fraud score volume (potential attack)
+      - alert: HighFraudScoreVolume
+        expr: |
+          rate(fraud_detection_scores_total{result="blocked"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Unusually high blocked transaction rate"
+          description: "Fraud detection service is blocking > 10 transactions per second, potential fraud attack."
+          runbook: "Review blocked transactions in audit logs. Check for coordinated attack patterns. Alert security team."
+
+      # ML model serving latency high
+      - alert: HighMLModelLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(fraud_model_prediction_duration_seconds_bucket[5m])) by (le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High ML model prediction latency"
+          description: "Fraud detection ML model p99 prediction time > 2 seconds."
+          runbook: "Check model serving resources. Consider model optimization or batch prediction."
+
+  # ===========================================================================
+  # Rate Limiting & API Gateway Alerts
+  # ===========================================================================
+  - name: api_gateway
+    interval: 30s
+    rules:
+      # High rate limit rejection rate
+      - alert: HighRateLimitRejections
+        expr: |
+          rate(gateway_rate_limit_rejections_total[5m]) > 100
+        for: 2m
+        labels:
+          severity: info
+          category: rate_limiting
+        annotations:
+          summary: "High rate limit rejection rate"
+          description: "API Gateway is rejecting > 100 requests per second due to rate limiting."
+          runbook: "Review client behavior. Check if legitimate traffic is being rate limited. Consider adjusting rate limits."
+
+      # Gateway timeout rate high
+      - alert: HighGatewayTimeoutRate
+        expr: |
+          (
+            sum(rate(http_server_requests_seconds_count{status="504"}[5m])) by (job)
+            /
+            sum(rate(http_server_requests_seconds_count[5m])) by (job)
+          ) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+          category: gateway
+        annotations:
+          summary: "High gateway timeout rate (> 1%)"
+          description: "API Gateway is experiencing {{ $value | humanizePercentage }} timeout rate."
+          runbook: "Check downstream service health and latency. Review gateway timeout configuration."

@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ─────────────────────────────────────────────
+         Parent
+    ───────────────────────────────────────────── -->
+    <parent>
+        <groupId>com.bbss</groupId>
+        <artifactId>blockchain-banking-security</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <!-- ─────────────────────────────────────────────
+         Module coordinates
+         Packaging defaults to 'jar' – this module is a
+         plain library consumed by the service modules.
+         The spring-boot-maven-plugin is intentionally
+         NOT declared here so the jar is NOT repackaged
+         into a fat/executable jar.
+    ───────────────────────────────────────────── -->
+    <artifactId>shared</artifactId>
+    <name>BBSS :: Shared</name>
+    <description>
+        Cross-cutting library shared by all BBSS microservices.
+        Contains DTOs, domain events, exception hierarchy, security
+        utilities and Spring MVC auto-configuration.
+    </description>
+
+    <!-- ─────────────────────────────────────────────
+         Dependencies
+    ───────────────────────────────────────────── -->
+    <dependencies>
+
+        <!-- Spring MVC (used by GlobalExceptionHandler + REST controllers) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- Apache Kafka client + Spring integration -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+
+        <!-- Lombok: compile-time code generation (getters, builders, etc.) -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- MapStruct: type-safe bean mapping -->
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct</artifactId>
+        </dependency>
+
+        <!-- Spring Security core (Authentication, AccessDeniedException, etc.)
+             Scope is 'provided' so service modules can choose the full starter. -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-core</artifactId>
+        </dependency>
+
+        <!-- Jackson Databind: JSON serialization / deserialization -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <!-- Jackson: Java 8 date/time module (LocalDateTime support) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+
+        <!-- SpringDoc OpenAPI 2 – API documentation annotations and models -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
+        </dependency>
+
+        <!-- Spring Data Commons: Page<T> for PageResponse factory method -->
+        <dependency>
+            <groupId>org.springframework.data</groupId>
+            <artifactId>spring-data-commons</artifactId>
+        </dependency>
+
+        <!-- ── Test scope ────────────────────────────────────────────── -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+    <!-- ─────────────────────────────────────────────
+         Build
+         Only the compiler plugin is needed here.
+         spring-boot-maven-plugin is intentionally absent.
+    ───────────────────────────────────────────── -->
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <!-- version and annotationProcessorPaths are inherited from
+                     the parent's pluginManagement section -->
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

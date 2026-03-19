@@ -1,0 +1,54 @@
+# Environment / secrets — never commit real credentials
+.env
+
+# Java / Maven
+**/target/
+**/*.class
+**/*.jar
+!**/src/main/resources/*.jar
+.mvn/
+!.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+fraud-detection/venv/
+fraud-detection/.venv/
+fraud-detection/*.egg-info/
+fraud-detection/dist/
+fraud-detection/build/
+fraud-detection/app/ml/artifacts/*.pkl
+fraud-detection/app/ml/artifacts/*.joblib
+
+# Node.js / Next.js
+frontend/dashboard/node_modules/
+frontend/dashboard/.next/
+frontend/dashboard/out/
+frontend/dashboard/.env.local
+frontend/dashboard/.env.production.local
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Blockchain crypto material (if generated locally)
+blockchain/crypto-config/
+blockchain/channel-artifacts/

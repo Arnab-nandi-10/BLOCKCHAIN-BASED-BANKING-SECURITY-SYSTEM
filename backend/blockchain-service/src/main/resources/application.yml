@@ -1,0 +1,168 @@
+server:
+  port: 8084
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: blockchain-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:bbss_blockchain}
+    username: ${DB_USERNAME:bbss_user}
+    password: ${DB_PASSWORD:bbss_pass}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      pool-name: blockchain-service-pool
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+        default_schema: public
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
+    schemas: public
+    table: flyway_schema_history_blockchain
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: true
+        acks: all
+        retries: 3
+        retry.backoff.ms: 1000
+        enable.idempotence: true
+    consumer:
+      group-id: blockchain-service
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        spring.json.trusted.packages: "com.bbss.*"
+    listener:
+      ack-mode: manual_immediate
+      concurrency: 3
+
+# Hyperledger Fabric Gateway configuration
+# All sensitive paths are injected via environment variables at runtime.
+# Set FABRIC_ENABLED=true only when a real Fabric network is available.
+fabric:
+  enabled: ${FABRIC_ENABLED:false}
+  network-name: ${FABRIC_NETWORK_NAME:bbss-network}
+  channel-name: ${FABRIC_CHANNEL_NAME:bbss-channel}
+  chaincode-transaction: ${FABRIC_CHAINCODE_TRANSACTION:transaction-cc}
+  chaincode-audit: ${FABRIC_CHAINCODE_AUDIT:audit-cc}
+  msp-id: ${FABRIC_MSP_ID:Org1MSP}
+  # Absolute path to the TLS root CA certificate PEM for the peer
+  tls-cert-path: ${FABRIC_TLS_CERT_PATH:/crypto/organizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt}
+  # Absolute path to the signing certificate PEM for the client identity
+  cert-path: ${FABRIC_CERT_PATH:/crypto/organizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/cert.pem}
+  # Absolute path to the directory containing the private key PEM
+  keystore-path: ${FABRIC_KEYSTORE_PATH:/crypto/organizations/org1.example.com/users/Admin@org1.example.com/msp/keystore}
+  # gRPC peer endpoint (host:port)
+  peer-endpoint: ${FABRIC_PEER_ENDPOINT:peer0.org1.example.com:7051}
+  # Override authority for TLS SNI matching
+  peer-host-alias: ${FABRIC_PEER_HOST_ALIAS:peer0.org1.example.com}
+
+# Security
+security:
+  jwt:
+    secret: ${JWT_SECRET:blockchain-banking-security-jwt-secret-key-256bits}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+
+# Resilience4j Circuit Breaker configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      fabricGateway:
+        register-health-indicator: true
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        wait-duration-in-open-state: 20s
+        failure-rate-threshold: 30
+        slow-call-rate-threshold: 50
+        slow-call-duration-threshold: 15s
+        record-exceptions:
+          - io.grpc.StatusRuntimeException
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+        ignore-exceptions:
+          - java.lang.IllegalArgumentException
+  timelimiter:
+    instances:
+      fabricGateway:
+        timeout-duration: 20s
+  bulkhead:
+    instances:
+      fabricGateway:
+        max-concurrent-calls: 5
+        max-wait-duration: 10s
+
+# Spring Boot Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+  metrics:
+    tags:
+      application: blockchain-service
+      service: blockchain-service
+      environment: ${ENVIRONMENT:development}
+  tracing:
+    sampling:
+      probability: 1.0  # 100% trace sampling for development
+  zipkin:
+    base-url: ${ZIPKIN_BASE_URL:http://jaeger:9411}
+    tracing:
+      endpoint: ${ZIPKIN_BASE_URL:http://jaeger:9411}/api/v2/spans
+
+# SpringDoc OpenAPI
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+
+logging:
+  level:
+    com.bbss.blockchain: INFO
+    org.springframework.kafka: WARN
+    org.hibernate.SQL: WARN
+    org.hyperledger.fabric: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId}/%X{spanId}] [%X{tenantId}] [%X{txId}] %logger{36} - %msg%n"

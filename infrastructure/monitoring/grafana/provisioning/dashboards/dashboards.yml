@@ -1,0 +1,17 @@
+apiVersion: 1
+
+# Grafana dashboard provisioning configuration
+# Automatically imports all dashboard JSON files from the specified folder
+# Ref: https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards
+
+providers:
+  - name: 'BBSS Dashboards'
+    orgId: 1
+    folder: 'BBSS Monitoring'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

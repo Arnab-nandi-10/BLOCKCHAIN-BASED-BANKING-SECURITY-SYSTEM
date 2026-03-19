@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  vault:
+    image: hashicorp/vault:1.15.4
+    container_name: bbss-vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_ROOT_TOKEN:-bbss-dev-token}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vault-data:/vault/file
+      - ./infrastructure/vault/config:/vault/config
+      - ./infrastructure/vault/policies:/vault/policies
+    command: server -dev -dev-root-token-id=${VAULT_ROOT_TOKEN:-bbss-dev-token}
+    networks:
+      - bbss-network
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  vault-init:
+    image: hashicorp/vault:1.15.4
+    container_name: bbss-vault-init
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: ${VAULT_ROOT_TOKEN:-bbss-dev-token}
+    volumes:
+      - ./infrastructure/vault/scripts:/scripts
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Vault to be ready..."
+        sleep 5
+        
+        # Enable KV secrets engine
+        vault secrets enable -version=2 -path=secret kv || true
+        
+        # Store JWT signing secret
+        vault kv put secret/auth-service \
+          jwt.secret="${JWT_SECRET:-YmJzcy1qd3Qtc2VjcmV0LWtleS0yMDI2LWJsb2NrY2hhaW4tYmFua2luZy1zZWN1cml0eS1zeXN0ZW0=}" \
+          jwt.expiration=3600000 \
+          jwt.refresh-expiration=604800000
+        
+        # Store database credentials
+        vault kv put secret/database \
+          postgres.username=bbss_user \
+          postgres.password="${POSTGRES_PASSWORD:-bbss_secure_pass_2026}" \
+          postgres.host=postgres \
+          postgres.port=5432
+        
+        # Store Kafka credentials (for production with SASL)
+        vault kv put secret/kafka \
+          bootstrap.servers=kafka:9092 \
+          sasl.username="${KAFKA_USERNAME:-}" \
+          sasl.password="${KAFKA_PASSWORD:-}" \
+          sasl.mechanism=PLAIN
+        
+        # Store Redis credentials
+        vault kv put secret/redis \
+          host=redis \
+          port=6379 \
+          password="${REDIS_PASSWORD:-}"
+        
+        # Create AppRole for auth-service
+        vault auth enable approle || true
+        vault write auth/approle/role/auth-service \
+          token_ttl=1h \
+          token_max_ttl=4h \
+          policies="auth-service-policy"
+        
+        # Create AppRole for transaction-service
+        vault write auth/approle/role/transaction-service \
+          token_ttl=1h \
+          token_max_ttl=4h \
+          policies="transaction-service-policy"
+        
+        # Create AppRole for blockchain-service
+        vault write auth/approle/role/blockchain-service \
+          token_ttl=1h \
+          token_max_ttl=4h \
+          policies="blockchain-service-policy"
+        
+        # Get and display role IDs
+        echo "=== Vault Initialization Complete ==="
+        echo "Root Token: ${VAULT_TOKEN}"
+        echo ""
+        echo "Auth Service Role ID:"
+        vault read -field=role_id auth/approle/role/auth-service/role-id
+        echo ""
+        echo "Transaction Service Role ID:"
+        vault read -field=role_id auth/approle/role/transaction-service/role-id
+        echo ""
+        echo "Blockchain Service Role ID:"
+        vault read -field=role_id auth/approle/role/blockchain-service/role-id
+        
+        echo "Vault setup completed successfully"
+    networks:
+      - bbss-network
+
+volumes:
+  vault-data:
+    driver: local
+
+networks:
+  bbss-network:
+    external: true

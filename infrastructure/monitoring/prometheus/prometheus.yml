@@ -1,0 +1,122 @@
+# =============================================================================
+# Blockchain Banking Security System — Prometheus Configuration
+# =============================================================================
+# All Spring Boot services expose metrics via the Micrometer Prometheus
+# registry at /actuator/prometheus.
+# The fraud-detection FastAPI service exposes metrics at /metrics.
+# =============================================================================
+
+global:
+  scrape_interval:     30s   # Default interval between scrapes
+  evaluation_interval: 30s   # Interval between rule evaluations
+  scrape_timeout:      10s   # Per-target scrape timeout
+
+  # Attach these labels to every time series scraped from this Prometheus.
+  external_labels:
+    environment: "development"
+    project:     "blockchain-banking-security-system"
+
+# =============================================================================
+# Alerting (placeholder — configure Alertmanager when needed)
+# =============================================================================
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#           - alertmanager:9093
+
+# =============================================================================
+# Rule files (place recording/alerting rules here)
+# =============================================================================
+rule_files:
+  - "alerts.yml"
+
+# =============================================================================
+# Scrape configurations
+# =============================================================================
+scrape_configs:
+
+  # ---------------------------------------------------------------------------
+  # Prometheus itself
+  # ---------------------------------------------------------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+    metrics_path: /metrics
+
+  # ---------------------------------------------------------------------------
+  # API Gateway — Spring Cloud Gateway
+  # ---------------------------------------------------------------------------
+  - job_name: "api-gateway"
+    static_configs:
+      - targets: ["api-gateway:8080"]
+        labels:
+          service: "api-gateway"
+          layer:   "infrastructure"
+    metrics_path: /actuator/prometheus
+
+  # ---------------------------------------------------------------------------
+  # Auth Service — Spring Boot
+  # ---------------------------------------------------------------------------
+  - job_name: "auth-service"
+    static_configs:
+      - targets: ["auth-service:8081"]
+        labels:
+          service: "auth-service"
+          layer:   "backend"
+    metrics_path: /actuator/prometheus
+
+  # ---------------------------------------------------------------------------
+  # Tenant Service — Spring Boot
+  # ---------------------------------------------------------------------------
+  - job_name: "tenant-service"
+    static_configs:
+      - targets: ["tenant-service:8082"]
+        labels:
+          service: "tenant-service"
+          layer:   "backend"
+    metrics_path: /actuator/prometheus
+
+  # ---------------------------------------------------------------------------
+  # Transaction Service — Spring Boot
+  # ---------------------------------------------------------------------------
+  - job_name: "transaction-service"
+    static_configs:
+      - targets: ["transaction-service:8083"]
+        labels:
+          service: "transaction-service"
+          layer:   "backend"
+    metrics_path: /actuator/prometheus
+
+  # ---------------------------------------------------------------------------
+  # Blockchain Service — Spring Boot / Go gateway
+  # ---------------------------------------------------------------------------
+  - job_name: "blockchain-service"
+    static_configs:
+      - targets: ["blockchain-service:8084"]
+        labels:
+          service: "blockchain-service"
+          layer:   "backend"
+    metrics_path: /actuator/prometheus
+
+  # ---------------------------------------------------------------------------
+  # Audit Service — Spring Boot
+  # ---------------------------------------------------------------------------
+  - job_name: "audit-service"
+    static_configs:
+      - targets: ["audit-service:8085"]
+        labels:
+          service: "audit-service"
+          layer:   "backend"
+    metrics_path: /actuator/prometheus
+
+  # ---------------------------------------------------------------------------
+  # Fraud Detection Service — FastAPI / Python (Prometheus client library)
+  # ---------------------------------------------------------------------------
+  - job_name: "fraud-detection"
+    static_configs:
+      - targets: ["fraud-detection:8000"]
+        labels:
+          service: "fraud-detection"
+          layer:   "ml"
+    metrics_path: /metrics
