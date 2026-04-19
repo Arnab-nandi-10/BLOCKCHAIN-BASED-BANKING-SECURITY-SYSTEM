@@ -445,7 +445,7 @@ Priority order:
 | Layer | Technologies |
 |-------|-------------|
 | Frontend | Next.js 14, React 18, Tailwind CSS, TypeScript |
-| Backend | Spring Boot 3.2, Java 21, Maven |
+| Backend | Spring Boot 3.2, Java 25, Maven |
 | Data | PostgreSQL 15, Redis 7, Apache Kafka |
 | Blockchain | Hyperledger Fabric 2.5 |
 | Observability | Prometheus, Grafana, Jaeger, Micrometer |

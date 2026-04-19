@@ -1,4 +1,4 @@
-FROM maven:3.9.6-eclipse-temurin-21-alpine AS build
+FROM maven:3.9.6-eclipse-temurin-25-alpine AS build
 
 WORKDIR /workspace
 
@@ -18,7 +18,7 @@ COPY shared/src shared/src
 COPY auth-service/src auth-service/src
 RUN mvn -B package -pl auth-service -am -DskipTests --no-transfer-progress
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 
 RUN addgroup -S bbss && adduser -S bbss -G bbss
 

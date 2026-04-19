@@ -71,7 +71,7 @@ you attempt to start the stack:
 
 | Tool           | Minimum Version | Notes                          |
 |----------------|-----------------|--------------------------------|
-| Java (JDK)     | 21              | Required for all Spring services |
+| Java (JDK)     | 25              | Required for all Spring services |
 | Apache Maven   | 3.9+            | Java build tool                |
 | Python         | 3.11+           | Fraud detection service        |
 | Node.js        | 20 LTS          | Next.js dashboard              |

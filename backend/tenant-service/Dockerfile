@@ -1,4 +1,4 @@
-FROM maven:3.9-eclipse-temurin-21-alpine AS build
+FROM maven:3.9-eclipse-temurin-25-alpine AS build
 WORKDIR /app
 
 # Parent POM
@@ -20,7 +20,7 @@ COPY tenant-service/src ./tenant-service/src
 
 RUN mvn package -pl tenant-service -am -DskipTests -q
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
 COPY --from=build /app/tenant-service/target/*.jar app.jar
 EXPOSE 8082

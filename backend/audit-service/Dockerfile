@@ -2,7 +2,7 @@
 # Audit Service – Multi-stage Docker build
 # =============================================================================
 
-FROM maven:3.9.6-eclipse-temurin-21-alpine AS deps
+FROM maven:3.9.6-eclipse-temurin-25-alpine AS deps
 
 WORKDIR /workspace
 
@@ -39,7 +39,7 @@ RUN mvn install \
         --no-transfer-progress \
         -q
 
-FROM eclipse-temurin:21-jre-alpine AS runner
+FROM eclipse-temurin:25-jre-alpine AS runner
 
 RUN addgroup --system --gid 1001 appgroup \
  && adduser  --system --uid 1001 --ingroup appgroup --no-create-home appuser

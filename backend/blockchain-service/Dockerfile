@@ -1,13 +1,13 @@
 # =============================================================================
 # Multi-stage build for blockchain-service
 # Stage 1: Build with Maven
-# Stage 2: Runtime with eclipse-temurin:21-jre-alpine
+# Stage 2: Runtime with eclipse-temurin:25-jre-alpine
 # =============================================================================
 
 # ---------------------------------------------------------------------------
 # Stage 1 — Build
 # ---------------------------------------------------------------------------
-FROM maven:3.9.6-eclipse-temurin-21-alpine AS build
+FROM maven:3.9.6-eclipse-temurin-25-alpine AS build
 
 WORKDIR /workspace
 
@@ -43,7 +43,7 @@ RUN mvn -B package \
 # ---------------------------------------------------------------------------
 # Stage 2 — Runtime
 # ---------------------------------------------------------------------------
-FROM eclipse-temurin:21-jre-alpine AS runtime
+FROM eclipse-temurin:25-jre-alpine AS runtime
 
 # Non-root user for security hardening.
 RUN addgroup -S bbss && adduser -S bbss -G bbss
