@@ -45,6 +45,7 @@
         <!-- Framework BOM versions -->
         <!-- CVE-2024-38816, CVE-2024-22233: Spring Boot upgraded from 3.2.3 -->
         <spring-boot.version>3.3.6</spring-boot.version>
+        <spring-boot-maven-plugin.version>4.0.5</spring-boot-maven-plugin.version>
         <!-- Spring Cloud 2023.0.3 is compatible with Spring Boot 3.3.x -->
         <spring-cloud.version>2023.0.3</spring-cloud.version>
 
@@ -200,7 +201,7 @@
                 <plugin>
                     <groupId>org.springframework.boot</groupId>
                     <artifactId>spring-boot-maven-plugin</artifactId>
-                    <version>${spring-boot.version}</version>
+                    <version>${spring-boot-maven-plugin.version}</version>
                     <executions>
                         <execution>
                             <goals>
