@@ -86,7 +86,7 @@
   }
 
   /* ── Dark Theme ──────────────────────────────────────────────────────── */
-  .dark {
+.dark {
     --bg-base:       #0F172A;    /* slate-900 */
     --bg-body:       #0F172A;
     --bg-surface:    #1E293B;    /* slate-800 */
@@ -149,6 +149,12 @@
     --shadow-lg:  0 4px 6px -1px rgba(0, 0, 0, 0.5);
   }
 
+  .dark .glass-panel {
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.86), rgba(30, 41, 59, 0.72));
+    border-color: rgba(148, 163, 184, 0.14);
+    box-shadow: 0 30px 90px rgba(2, 8, 23, 0.45);
+  }
+
   /* ── Base Styles ──────────────────────────────────────────────────────── */
   html {
     font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -183,6 +189,13 @@
 }
 
 @layer components {
+  .glass-panel {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.64));
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    box-shadow: 0 30px 90px rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(18px);
+  }
+
   /* ── Card / Panel ───────────────────────────────────────────────────────── */
   .card {
     @apply rounded-2xl;
@@ -286,6 +299,73 @@
   .animate-slide-up      { animation: slideUp    0.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
   .animate-slide-in-left { animation: slideInLeft 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
   .animate-scale-in      { animation: scaleIn    0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+  .bg-grid-fade {
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: radial-gradient(circle at center, black 34%, transparent 92%);
+  }
+
+  .showcase-grid {
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.1) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.1) 1px, transparent 1px);
+    background-size: 28px 28px;
+    animation: gridFloat 16s linear infinite;
+  }
+
+  .hero-orb {
+    pointer-events: none;
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(50px);
+    opacity: 0.9;
+  }
+
+  .hero-orb-primary {
+    top: 6rem;
+    right: 8%;
+    height: 22rem;
+    width: 22rem;
+    background: rgba(37, 99, 235, 0.16);
+    animation: orbDrift 14s ease-in-out infinite;
+  }
+
+  .hero-orb-secondary {
+    left: -3rem;
+    top: 12rem;
+    height: 18rem;
+    width: 18rem;
+    background: rgba(20, 184, 166, 0.12);
+    animation: orbDrift 18s ease-in-out infinite reverse;
+  }
+
+  .hero-orb-tertiary {
+    bottom: 3rem;
+    right: 22%;
+    height: 15rem;
+    width: 15rem;
+    background: rgba(249, 115, 22, 0.12);
+    animation: orbDrift 16s ease-in-out infinite;
+    animation-delay: -5s;
+  }
+
+  .story-beam {
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.88), transparent);
+    transform: skewX(-18deg);
+    animation: beamSweep 8s linear infinite;
+  }
+
+  .motion-float {
+    animation: panelFloat 7s ease-in-out infinite;
+  }
+
+  .motion-float-delayed {
+    animation: panelFloat 8.5s ease-in-out infinite;
+    animation-delay: -2.5s;
+  }
 }
 
 /* ── Keyframes ───────────────────────────────────────────────────────────────────── */
@@ -314,6 +394,26 @@
   to   { opacity: 1; transform: scale(1); }
 }
 
+@keyframes orbDrift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(18px, -26px, 0) scale(1.08); }
+}
+
+@keyframes panelFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes beamSweep {
+  0% { transform: translateX(-140%) skewX(-18deg); }
+  100% { transform: translateX(320%) skewX(-18deg); }
+}
+
+@keyframes gridFloat {
+  0% { transform: translate3d(0, 0, 0); }
+  100% { transform: translate3d(-28px, -28px, 0); }
+}
+
 
 
 /* ── Keyframes ────────────────────────────────────────────────────────────── */
@@ -340,4 +440,20 @@
 @keyframes slideInLeft {
   from { opacity: 0; transform: translateX(-12px); }
   to   { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .hero-orb,
+  .story-beam,
+  .motion-float,
+  .motion-float-delayed,
+  .showcase-grid,
+  .dot-live,
+  .skeleton {
+    animation: none !important;
+  }
 }

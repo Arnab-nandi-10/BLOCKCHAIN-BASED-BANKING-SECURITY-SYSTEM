@@ -199,7 +199,7 @@ services:
       JWT_REFRESH_EXPIRATION_MS: ${JWT_REFRESH_EXPIRATION_MS}
       SERVER_PORT: 8081
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health/readiness || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8081/actuator/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -231,7 +231,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       SERVER_PORT: 8082
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8082/actuator/health/readiness || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8082/actuator/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -273,7 +273,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       SERVER_PORT: 8084
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8084/actuator/health/readiness || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8084/actuator/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -309,7 +309,7 @@ services:
       FRAUD_SERVICE_URL: http://fraud-detection:8000
       SERVER_PORT: 8083
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8083/actuator/health/readiness || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8083/actuator/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -342,7 +342,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       SERVER_PORT: 8085
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8085/actuator/health/readiness || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8085/actuator/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -376,7 +376,7 @@ services:
       UNUSUAL_HOUR_START: 3
       UNUSUAL_HOUR_END: 5
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/ready || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/ready')\" || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -415,7 +415,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       SERVER_PORT: 8080
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health/readiness || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/actuator/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -424,22 +424,22 @@ services:
       - bbss-network
 
   # ---------------------------------------------------------------------------
-  # Frontend: Next.js Dashboard (port 3000)
+  # Frontend: Next.js Dashboard (port 5000)
   # ---------------------------------------------------------------------------
   dashboard:
     build:
       context: ./frontend/dashboard
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+        NEXT_PUBLIC_API_URL: http://api-gateway:8080
     container_name: bbss-dashboard
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "5000:3000"
     depends_on:
       - api-gateway
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080}
+      NEXT_PUBLIC_API_URL: http://api-gateway:8080
       NODE_ENV: production
     networks:
       - bbss-network

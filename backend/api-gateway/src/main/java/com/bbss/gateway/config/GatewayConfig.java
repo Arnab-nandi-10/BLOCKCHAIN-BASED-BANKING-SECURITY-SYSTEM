@@ -2,7 +2,6 @@ package com.bbss.gateway.config;
 
 import com.bbss.gateway.filter.TenantAuthGatewayFilterFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.cloud.circuitbreaker.resilience4j.ReactiveResilience4JAutoConfiguration;
 import org.springframework.cloud.gateway.filter.ratelimit.RedisRateLimiter;
 import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
@@ -22,22 +21,10 @@ public class GatewayConfig {
     public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
         return builder.routes()
 
-            // Auth Service - no auth filter, no circuit breaker needed (lightweight)
+            // Auth Service - preserve downstream auth responses; no retry/circuit breaker
+            // so login/register requests are never duplicated or masked by a fallback 503.
             .route("auth-service", r -> r
                 .path("/api/v1/auth/**")
-                .filters(f -> f
-                    .retry(config -> config
-                        .setRetries(3)
-                        .setMethods(
-                            org.springframework.http.HttpMethod.GET,
-                            org.springframework.http.HttpMethod.POST
-                        )
-                    )
-                    .circuitBreaker(config -> config
-                        .setName("auth-service")
-                        .setFallbackUri("forward:/fallback")
-                    )
-                )
                 .uri("http://auth-service:8081")
             )
 

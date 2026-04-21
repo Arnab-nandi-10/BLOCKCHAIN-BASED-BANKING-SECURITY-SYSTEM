@@ -16,7 +16,7 @@ RUN mkdir -p public
 RUN rm -f next.config.ts
 ENV NEXT_TELEMETRY_DISABLED 1
 # Set API URL at build time
-ARG NEXT_PUBLIC_API_URL=http://localhost:8080
+ARG NEXT_PUBLIC_API_URL=http://api-gateway:8080
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
 

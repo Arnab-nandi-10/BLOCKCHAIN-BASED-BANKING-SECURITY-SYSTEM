@@ -17,6 +17,12 @@
     <name>api-gateway</name>
     <description>API Gateway for Blockchain Banking Security System</description>
 
+    <properties>
+        <!-- Spring's classpath scanner in this gateway module is not compatible
+             with Java 25 bytecode yet, so compile the gateway to Java 21. -->
+        <java.version>21</java.version>
+    </properties>
+
     <dependencies>
         <!-- Shared module -->
         <dependency>

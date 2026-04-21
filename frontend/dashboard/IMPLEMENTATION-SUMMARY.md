@@ -120,7 +120,7 @@ frontend/dashboard/
    npm run dev
    ```
 
-4. **Visit:** http://localhost:3000/overview
+4. **Visit:** http://localhost:5000/overview
 
 ### Manual Integration (Alternative)
 

@@ -334,7 +334,7 @@ import { Badge } from '@/components/ui/badge'
 npm run dev
 ```
 
-Visit `http://localhost:3000/overview`
+Visit `http://localhost:5000/overview`
 
 ### Step 4: Update Other Pages
 

@@ -29,7 +29,9 @@ import type {
 // ─── Axios Instance ───────────────────────────────────────────────────────────
 
 const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
+  typeof window !== 'undefined'
+    ? ''
+    : process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
@@ -82,7 +84,12 @@ apiClient.interceptors.response.use(
     return response
   },
   (error: AxiosError) => {
-    if (error.response?.status === 401) {
+    const requestUrl = error.config?.url ?? ''
+    const isAuthEntryRequest =
+      requestUrl.includes('/api/v1/auth/login') ||
+      requestUrl.includes('/api/v1/auth/register')
+
+    if (error.response?.status === 401 && !isAuthEntryRequest) {
       // Clear persisted auth
       Cookies.remove('accessToken')
       Cookies.remove('refreshToken')

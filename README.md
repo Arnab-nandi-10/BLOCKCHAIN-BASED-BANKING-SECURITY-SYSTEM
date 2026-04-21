@@ -127,7 +127,7 @@ All services should show status **healthy** or **running** within 90 seconds.
 
 | Service             | URL                              | Notes                        |
 |---------------------|----------------------------------|------------------------------|
-| Dashboard (UI)      | http://localhost:3000            | Next.js frontend             |
+| Dashboard (UI)      | http://localhost:5000            | Next.js frontend             |
 | API Gateway         | http://localhost:8080            | Entry point for all REST APIs |
 | Auth Service        | http://localhost:8081/actuator   | Health, metrics              |
 | Tenant Service      | http://localhost:8082/actuator   | Health, metrics              |

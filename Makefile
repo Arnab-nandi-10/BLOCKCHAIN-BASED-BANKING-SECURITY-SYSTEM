@@ -65,7 +65,7 @@ setup: ## Copy .env.example to .env and create required local directories
 # -----------------------------------------------------------------------------
 dev-up: ## Start all services in detached mode
 	docker compose up -d
-	@printf "$(GREEN)All services started. Dashboard: http://localhost:3000  Gateway: http://localhost:8080$(RESET)\n"
+	@printf "$(GREEN)All services started. Dashboard: http://localhost:5000  Gateway: http://localhost:8080$(RESET)\n"
 
 dev-down: ## Stop all running services (keeps volumes)
 	docker compose down

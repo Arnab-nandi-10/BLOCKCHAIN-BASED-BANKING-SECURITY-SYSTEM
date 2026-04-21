@@ -53,19 +53,25 @@ public class RequestLoggingFilter implements GlobalFilter, Ordered {
 
         ServerWebExchange mutatedExchange = exchange.mutate().request(mutatedRequest).build();
 
-        return chain.filter(mutatedExchange).then(Mono.fromRunnable(() -> {
+        mutatedExchange.getResponse().beforeCommit(() -> {
             ServerHttpResponse response = mutatedExchange.getResponse();
             long durationMs = System.currentTimeMillis() - startTime;
-            int statusCode = response.getStatusCode() != null ? response.getStatusCode().value() : 0;
-
-            log.info("Outgoing response - requestId: {}, status: {}, duration: {}ms",
-                    finalRequestId, statusCode, durationMs);
-
             response.getHeaders().set(REQUEST_ID_HEADER, finalRequestId);
             response.getHeaders().set(RESPONSE_TIME_HEADER, durationMs + "ms");
+            return Mono.empty();
+        });
 
-            MDC.clear();
-        }));
+        return chain.filter(mutatedExchange)
+                .doFinally(signalType -> {
+                    ServerHttpResponse response = mutatedExchange.getResponse();
+                    long durationMs = System.currentTimeMillis() - startTime;
+                    int statusCode = response.getStatusCode() != null ? response.getStatusCode().value() : 0;
+
+                    log.info("Outgoing response - requestId: {}, status: {}, duration: {}ms",
+                            finalRequestId, statusCode, durationMs);
+
+                    MDC.clear();
+                });
     }
 
     @Override
