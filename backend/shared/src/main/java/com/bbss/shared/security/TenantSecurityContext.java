@@ -104,7 +104,7 @@ public class TenantSecurityContext {
      * {@code ROLE_SUPER_ADMIN} authority.
      *
      * <p>Super admins are platform-level operators (e.g. Anthropic SREs or
-     * BBSS operations team) that can view and manage resources across all
+    * Civic Savings operations team) that can view and manage resources across all
      * tenants.  Regular tenant administrators and end-users must never receive
      * this role.
      *

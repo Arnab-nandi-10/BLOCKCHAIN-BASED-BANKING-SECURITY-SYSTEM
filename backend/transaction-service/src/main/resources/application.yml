@@ -67,6 +67,8 @@ services:
     url: ${FRAUD_SERVICE_URL:http://fraud-detection:8000}
   blockchain-service:
     url: ${BLOCKCHAIN_SERVICE_URL:http://blockchain-service:8084}
+  tenant-service:
+    url: ${TENANT_SERVICE_URL:http://tenant-service:8082}
 
 # Feign client configuration
 feign:
@@ -79,6 +81,10 @@ feign:
       blockchain-service:
         connect-timeout: 5000
         read-timeout: 30000
+        logger-level: basic
+      tenant-service:
+        connect-timeout: 3000
+        read-timeout: 5000
         logger-level: basic
   circuitbreaker:
     enabled: true

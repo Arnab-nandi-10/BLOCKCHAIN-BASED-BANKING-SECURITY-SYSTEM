@@ -61,6 +61,9 @@ public class KafkaConfig {
     @Value("${spring.kafka.bootstrap-servers:localhost:9092}")
     private String bootstrapServers;
 
+    @Value("${spring.kafka.producer.compression-type:none}")
+    private String compressionType;
+
     private static final String GROUP_ID          = "audit-service";
     private static final String TRUSTED_PACKAGES  = "com.bbss.*";
 
@@ -76,7 +79,7 @@ public class KafkaConfig {
         props.put(ProducerConfig.RETRIES_CONFIG,                        3);
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG,             true);
         props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
-        props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG,               "snappy");
+        props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG,               compressionType);
         props.put(ProducerConfig.LINGER_MS_CONFIG,                      20);
         props.put(ProducerConfig.BATCH_SIZE_CONFIG,                     32 * 1024);
         props.put(JsonSerializer.ADD_TYPE_INFO_HEADERS,                 false);

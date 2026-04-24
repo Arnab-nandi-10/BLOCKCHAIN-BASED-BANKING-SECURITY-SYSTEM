@@ -26,7 +26,9 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -85,6 +87,14 @@ public class Transaction {
     @Column(name = "status", nullable = false, length = 32)
     private TransactionStatus status;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ledger_status", nullable = false, length = 32)
+    private LedgerStatus ledgerStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "verification_status", nullable = false, length = 32)
+    private VerificationStatus verificationStatus;
+
     /**
      * Hyperledger Fabric transaction hash, set after ledger write.
      */
@@ -103,6 +113,43 @@ public class Transaction {
 
     @Column(name = "fraud_risk_level", length = 32)
     private String fraudRiskLevel;
+
+    @Column(name = "fraud_decision", length = 16)
+    private String fraudDecision;
+
+    @Column(name = "fraud_recommendation", length = 128)
+    private String fraudRecommendation;
+
+    @Column(name = "review_required", nullable = false)
+    @Builder.Default
+    private boolean reviewRequired = false;
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(
+        name = "transaction_triggered_rules",
+        joinColumns = @JoinColumn(name = "transaction_id")
+    )
+    @Column(name = "rule_value", length = 255)
+    @Builder.Default
+    private List<String> triggeredRules = new ArrayList<>();
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(
+        name = "transaction_explanations",
+        joinColumns = @JoinColumn(name = "transaction_id")
+    )
+    @Column(name = "explanation", length = 512)
+    @Builder.Default
+    private List<String> explanations = new ArrayList<>();
+
+    @Column(name = "payload_hash", length = 128)
+    private String payloadHash;
+
+    @Column(name = "record_hash", length = 128)
+    private String recordHash;
+
+    @Column(name = "previous_hash", length = 128)
+    private String previousHash;
 
     @Column(name = "rejection_reason", length = 512)
     private String rejectionReason;

@@ -2,7 +2,11 @@ package com.bbss.transaction.api;
 
 import com.bbss.shared.dto.ApiResponse;
 import com.bbss.transaction.domain.model.TransactionStatus;
+import com.bbss.transaction.domain.model.TransactionType;
+import com.bbss.transaction.domain.model.LedgerStatus;
+import com.bbss.transaction.domain.model.VerificationStatus;
 import com.bbss.transaction.dto.SubmitTransactionRequest;
+import com.bbss.transaction.dto.TransactionQueryFilters;
 import com.bbss.transaction.dto.TransactionResponse;
 import com.bbss.transaction.dto.TransactionStatsResponse;
 import com.bbss.transaction.service.TransactionService;
@@ -17,6 +21,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -28,6 +33,10 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 /**
  * REST controller exposing transaction management endpoints.
@@ -66,13 +75,16 @@ public class TransactionController {
             @RequestHeader("X-Tenant-ID")
             @Parameter(description = "Tenant identifier", required = true)
             String tenantId,
+            @RequestHeader(value = "X-Request-ID", required = false)
+            @Parameter(description = "End-to-end request identifier", required = false)
+            String requestId,
             @Valid @RequestBody SubmitTransactionRequest request,
             HttpServletRequest http) {
 
         String ipAddress = resolveClientIp(http);
         log.info("Submitting transaction for tenant={} from ip={}", tenantId, ipAddress);
 
-        TransactionResponse response = transactionService.submitTransaction(request, tenantId, ipAddress);
+        TransactionResponse response = transactionService.submitTransaction(request, tenantId, ipAddress, requestId);
 
         return ResponseEntity
                 .status(HttpStatus.CREATED)
@@ -96,10 +108,27 @@ public class TransactionController {
     public ResponseEntity<ApiResponse<Page<TransactionResponse>>> listTransactions(
             @RequestHeader("X-Tenant-ID") String tenantId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt,desc") String sort,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) TransactionStatus status,
+            @RequestParam(required = false) TransactionType type,
+            @RequestParam(required = false) LedgerStatus ledgerStatus,
+            @RequestParam(required = false) VerificationStatus verificationStatus,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        Page<TransactionResponse> result = transactionService.listTransactions(tenantId, pageable);
+        Pageable pageable = PageRequest.of(page, size, java.util.Objects.requireNonNull(parseSort(sort), "sort must not be null"));
+        TransactionQueryFilters filters = new TransactionQueryFilters(
+                search,
+                status,
+                type,
+                ledgerStatus,
+                verificationStatus,
+                atStartOfDay(fromDate),
+                atEndOfDay(toDate)
+        );
+        Page<TransactionResponse> result = transactionService.listTransactions(tenantId, filters, pageable);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
@@ -116,9 +145,15 @@ public class TransactionController {
     @GetMapping("/stats")
     @Operation(summary = "Get transaction statistics", description = "24-hour rolling statistics for the tenant.")
     public ResponseEntity<ApiResponse<TransactionStatsResponse>> getTransactionStats(
-            @RequestHeader("X-Tenant-ID") String tenantId) {
+            @RequestHeader("X-Tenant-ID") String tenantId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate) {
 
-        TransactionStatsResponse stats = transactionService.getTransactionStats(tenantId);
+        TransactionStatsResponse stats = transactionService.getTransactionStats(
+                tenantId,
+                atStartOfDay(fromDate),
+                atEndOfDay(toDate)
+        );
         return ResponseEntity.ok(ApiResponse.success(stats));
     }
 
@@ -187,5 +222,26 @@ public class TransactionController {
             return realIp.trim();
         }
         return request.getRemoteAddr();
+    }
+
+    private Sort parseSort(String sort) {
+        if (sort == null || sort.isBlank()) {
+            return Sort.by("createdAt").descending();
+        }
+
+        String[] parts = sort.split(",");
+        String property = parts.length > 0 && !parts[0].isBlank() ? parts[0].trim() : "createdAt";
+        Sort.Direction direction = parts.length > 1 && "asc".equalsIgnoreCase(parts[1])
+                ? Sort.Direction.ASC
+                : Sort.Direction.DESC;
+        return Sort.by(direction, property);
+    }
+
+    private LocalDateTime atStartOfDay(LocalDate value) {
+        return value != null ? value.atStartOfDay() : null;
+    }
+
+    private LocalDateTime atEndOfDay(LocalDate value) {
+        return value != null ? value.atTime(LocalTime.MAX) : null;
     }
 }

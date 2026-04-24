@@ -10,6 +10,7 @@ import type {
   TransactionStats,
   SubmitTransactionRequest,
   TransactionListParams,
+  TransactionStatus,
   PageResponse,
 } from '@/types'
 
@@ -19,6 +20,8 @@ export const transactionKeys = {
   all:    ['transactions']                           as const,
   lists:  () => [...transactionKeys.all, 'list']    as const,
   list:   (p: TransactionListParams) => [...transactionKeys.lists(), p] as const,
+  byStatus: (status: string, p: Pick<TransactionListParams, 'page' | 'size'>) =>
+    [...transactionKeys.all, 'status', status, p] as const,
   detail: (id: string) => [...transactionKeys.all, 'detail', id] as const,
   stats:  () => [...transactionKeys.all, 'stats']   as const,
 }
@@ -54,14 +57,31 @@ export function useTransaction(
   })
 }
 
+// ─── useTransactionsByStatus ─────────────────────────────────────────────────
+
+export function useTransactionsByStatus(
+  status: TransactionStatus,
+  params: Pick<TransactionListParams, 'page' | 'size'> = {},
+  options?: Omit<UseQueryOptions<PageResponse<Transaction>>, 'queryKey' | 'queryFn'>
+) {
+  return useQuery<PageResponse<Transaction>>({
+    queryKey: transactionKeys.byStatus(status, params),
+    queryFn: () => api.transactions.listByStatus(status, params),
+    enabled: Boolean(status),
+    placeholderData: (prev) => prev,
+    ...options,
+  })
+}
+
 // ─── useTransactionStats ─────────────────────────────────────────────────────
 
 export function useTransactionStats(
+  params?: Pick<TransactionListParams, 'fromDate' | 'toDate'>,
   options?: Omit<UseQueryOptions<TransactionStats>, 'queryKey' | 'queryFn'>
 ) {
   return useQuery<TransactionStats>({
-    queryKey: transactionKeys.stats(),
-    queryFn: () => api.transactions.getStats(),
+    queryKey: [...transactionKeys.stats(), params ?? {}],
+    queryFn: () => api.transactions.getStats(params),
     staleTime: 60_000,  // stats update every minute is fine
     ...options,
   })

@@ -44,7 +44,7 @@ public class BlockchainCommitService {
     private final BlockchainClientAdapter blockchainClientAdapter;
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
-    private static final String AUDIT_EVENTS_TOPIC = "audit.entry";
+    private static final String AUDIT_EVENTS_TOPIC = "audit.committed";
 
     /**
      * Commits the audit entry identified by {@code entryId} to the blockchain
@@ -52,7 +52,7 @@ public class BlockchainCommitService {
      * coordinates.
      *
      * <p>On success the entry transitions to {@link AuditStatus#COMMITTED} and
-     * an event is published to the {@code audit.entry} Kafka topic.
+     * an event is published to the {@code audit.committed} Kafka topic.
      *
      * <p>On any failure (network error, non-success response) the entry
      * transitions to {@link AuditStatus#FAILED}, leaving it eligible for
@@ -91,6 +91,7 @@ public class BlockchainCommitService {
             if (response != null && response.success()) {
                 entry.setBlockchainTxId(response.blockchainTxId());
                 entry.setBlockNumber(response.blockNumber());
+                entry.setVerificationStatus(response.verificationStatus());
                 entry.setStatus(AuditStatus.COMMITTED);
                 auditRepository.save(entry);
 
@@ -119,11 +120,12 @@ public class BlockchainCommitService {
         log.warn("Failed to commit audit entry auditId={} – {}",
                 entry.getAuditId(), reason);
         entry.setStatus(AuditStatus.FAILED);
+        entry.setVerificationStatus("UNAVAILABLE");
         auditRepository.save(entry);
     }
 
     /**
-     * Publishes a lightweight notification to the {@code audit.entry} topic so
+     * Publishes a lightweight notification to the {@code audit.committed} topic so
      * that downstream consumers (e.g. notification-service, dashboards) are
      * aware that the record is now anchored on the ledger.
      */
@@ -138,15 +140,16 @@ public class BlockchainCommitService {
             payload.put("actorId",         entry.getActorId());
             payload.put("blockchainTxId",  entry.getBlockchainTxId() != null ? entry.getBlockchainTxId() : "");
             payload.put("blockNumber",     entry.getBlockNumber()    != null ? entry.getBlockNumber()    : "");
+            payload.put("verificationStatus", entry.getVerificationStatus() != null ? entry.getVerificationStatus() : "");
             payload.put("status",          entry.getStatus().name());
             payload.put("occurredAt",      entry.getOccurredAt() != null ? entry.getOccurredAt().toString() : "");
             payload.put("correlationId",   entry.getCorrelationId() != null ? entry.getCorrelationId() : "");
 
             kafkaTemplate.send(AUDIT_EVENTS_TOPIC, entry.getTenantId(), payload);
-            log.debug("Published audit.entry event for auditId={}", entry.getAuditId());
+            log.debug("Published audit.committed event for auditId={}", entry.getAuditId());
 
         } catch (Exception e) {
-            log.warn("Failed to publish audit.entry Kafka event for auditId={}: {}",
+            log.warn("Failed to publish audit.committed Kafka event for auditId={}: {}",
                     entry.getAuditId(), e.getMessage());
         }
     }

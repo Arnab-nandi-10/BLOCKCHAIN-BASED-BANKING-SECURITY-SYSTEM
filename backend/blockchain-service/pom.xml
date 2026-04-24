@@ -15,6 +15,10 @@
     <name>blockchain-service</name>
     <description>Blockchain Service for Hyperledger Fabric integration in Blockchain Banking Security System</description>
 
+    <properties>
+        <java.version>21</java.version>
+    </properties>
+
     <dependencies>
         <!-- Internal shared module -->
         <dependency>

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document provides detailed implementation plans for Phases 3-7 of the BBSS platform modernization.
+This document provides detailed implementation plans for Phases 3-7 of the Civic Savings platform modernization.
 
 ---
 

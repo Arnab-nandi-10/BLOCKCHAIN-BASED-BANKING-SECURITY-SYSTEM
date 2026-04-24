@@ -22,32 +22,20 @@ import {
   CheckCircle2,
   Clock,
   Activity,
+  Server,
+  Wifi,
+  WifiOff,
 } from 'lucide-react'
-import { useTransactionStats, useTransactions } from '@/hooks/use-transactions'
+import { useTransactions, useTransactionStats } from '@/hooks/use-transactions'
 import { useAuditSummary } from '@/hooks/use-audit'
+import { useBlockchainServiceHealth } from '@/hooks/use-blockchain'
+import { useFraudHealth } from '@/hooks/use-fraud'
 import { StatCard } from '@/components/ui/stat-card'
 import { Badge } from '@/components/ui/badge'
-import { formatCurrency, formatDate, truncate, formatNumber } from '@/lib/utils'
-import type { Transaction, TransactionStatus } from '@/types'
+import { formatCurrency, formatDate, truncate, formatAccountNumber, formatNumber } from '@/lib/utils'
+import type { RiskLevel, Transaction, TransactionStatus } from '@/types'
 
-// ─── Mock chart data ──────────────────────────────────────────────────────────
-
-const volumeData = [
-  { day: 'Mon', count: 45,  amount: 125_000 },
-  { day: 'Tue', count: 62,  amount: 185_000 },
-  { day: 'Wed', count: 38,  amount: 92_000  },
-  { day: 'Thu', count: 71,  amount: 210_000 },
-  { day: 'Fri', count: 89,  amount: 267_000 },
-  { day: 'Sat', count: 23,  amount: 45_000  },
-  { day: 'Sun', count: 15,  amount: 32_000  },
-]
-
-const fraudDistribution = [
-  { name: 'LOW',      value: 65, color: '#10b981' },
-  { name: 'MEDIUM',   value: 20, color: '#f59e0b' },
-  { name: 'HIGH',     value: 10, color: '#f97316' },
-  { name: 'CRITICAL', value: 5,  color: '#ef4444' },
-]
+const riskLevels: RiskLevel[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']
 
 function statusVariant(status: TransactionStatus): 'success' | 'danger' | 'warning' | 'info' | 'default' {
   switch (status) {
@@ -59,6 +47,31 @@ function statusVariant(status: TransactionStatus): 'success' | 'danger' | 'warni
     case 'SUBMITTED':
     case 'PENDING_FRAUD_CHECK':  return 'info'
     default:                     return 'default'
+  }
+}
+
+function healthColor(status?: string) {
+  const normalized = (status ?? '').toUpperCase()
+  if (normalized === 'UP' || normalized === 'OK' || normalized === 'HEALTHY') {
+    return {
+      text: '#16A34A',
+      bg: 'rgba(16,185,129,0.1)',
+      border: 'rgba(16,185,129,0.2)',
+    }
+  }
+
+  if (normalized === 'DEGRADED' || normalized === 'WARNING' || normalized === 'WARN') {
+    return {
+      text: '#D97706',
+      bg: 'rgba(245,158,11,0.1)',
+      border: 'rgba(245,158,11,0.2)',
+    }
+  }
+
+  return {
+    text: '#DC2626',
+    bg: 'rgba(239,68,68,0.1)',
+    border: 'rgba(239,68,68,0.2)',
   }
 }
 
@@ -94,14 +107,62 @@ const ChartTooltip = ({ active, payload, label }: {
 }
 
 export default function OverviewPage() {
-  const { data: stats,       isLoading: statsLoading   } = useTransactionStats()
-  const { data: recentPage,  isLoading: recentLoading  } = useTransactions({ size: 8, sort: 'createdAt,desc' })
-  const { data: auditSummary, isLoading: auditLoading  } = useAuditSummary()
+  const statsRange = React.useMemo(() => {
+    const end = new Date()
+    const start = new Date()
+    start.setDate(end.getDate() - 6)
+    return {
+      fromDate: start.toISOString().slice(0, 10),
+      toDate: end.toISOString().slice(0, 10),
+    }
+  }, [])
 
-  const recentTxs: Transaction[] = recentPage?.content ?? []
+  const { data: transactionStats, isLoading: statsLoading } = useTransactionStats(statsRange)
+  const { data: recentTransactionsPage, isLoading: recentTransactionsLoading } = useTransactions({
+    size: 8,
+    sort: 'createdAt,desc',
+  })
+  const { data: auditSummary, isLoading: auditLoading } = useAuditSummary()
+  const { data: blockchainServiceHealth, isLoading: blockchainServiceLoading } = useBlockchainServiceHealth()
+  const { data: fraudServiceHealth, isLoading: fraudServiceLoading } = useFraudHealth()
 
-  const totalTransactions =
-    (stats?.totalSubmitted ?? 0) + (stats?.totalCompleted ?? 0) + (stats?.totalVerified ?? 0)
+  const recentTxs: Transaction[] = recentTransactionsPage?.content ?? []
+  const totalTransactions = transactionStats?.totalTransactions ?? 0
+  const hasTransactions = totalTransactions > 0
+
+  const transactionCounts = {
+    verified: transactionStats?.totalVerified ?? 0,
+    blocked: transactionStats?.totalBlocked ?? 0,
+    fraudHold: transactionStats?.totalFraudHold ?? 0,
+    completed: transactionStats?.totalCompleted ?? 0,
+    failed: transactionStats?.totalFailed ?? 0,
+    submitted: transactionStats?.totalSubmitted ?? 0,
+  }
+
+  const volumeData = (transactionStats?.dailyVolume ?? []).map((point) => ({
+    day: point.label,
+    count: point.transactionCount,
+    amount: point.totalAmount,
+  }))
+
+  const totalRiskCount = riskLevels.reduce((sum, level) => (
+    sum + Number(transactionStats?.fraudRiskDistribution?.[level] ?? 0)
+  ), 0)
+
+  // Only compute pie slices when there is real data; avoids showing equal-25%
+  // placeholder wedges when all counts are zero.
+  const hasFraudDistribution = totalRiskCount > 0
+  const fraudDistribution = riskLevels.map((level, index) => ({
+    name: level,
+    value: hasFraudDistribution
+      ? Number((((transactionStats?.fraudRiskDistribution?.[level] ?? 0) / totalRiskCount) * 100).toFixed(1))
+      : 0,
+    raw: Number(transactionStats?.fraudRiskDistribution?.[level] ?? 0),
+    color: ['#10b981', '#f59e0b', '#f97316', '#ef4444'][index],
+  }))
+
+  const blockchainTone = healthColor(blockchainServiceHealth?.status)
+  const fraudTone = healthColor(fraudServiceHealth?.status)
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -131,34 +192,30 @@ export default function OverviewPage() {
           subtitle="All-time submitted"
           icon={<ArrowLeftRight size={20} />}
           color="blue"
-          trend={{ value: 12, isPositive: true }}
           isLoading={statsLoading}
         />
         <StatCard
           title="Verified"
-          value={statsLoading ? '—' : formatNumber(stats?.totalVerified ?? 0)}
+          value={statsLoading ? '—' : formatNumber(transactionCounts.verified)}
           subtitle="Blockchain confirmed"
           icon={<ShieldCheck size={20} />}
           color="green"
-          trend={{ value: 8, isPositive: true }}
           isLoading={statsLoading}
         />
         <StatCard
           title="Blocked"
-          value={statsLoading ? '—' : formatNumber(stats?.totalBlocked ?? 0)}
+          value={statsLoading ? '—' : formatNumber(transactionCounts.blocked)}
           subtitle="Fraud prevention"
           icon={<ShieldX size={20} />}
           color="red"
-          trend={{ value: 3, isPositive: false }}
           isLoading={statsLoading}
         />
         <StatCard
           title="Fraud Hold"
-          value={statsLoading ? '—' : formatNumber(stats?.totalFraudHold ?? 0)}
+          value={statsLoading ? '—' : formatNumber(transactionCounts.fraudHold)}
           subtitle="Pending review"
           icon={<AlertTriangle size={20} />}
           color="amber"
-          trend={{ value: 5, isPositive: false }}
           isLoading={statsLoading}
         />
       </div>
@@ -184,6 +241,55 @@ export default function OverviewPage() {
         </div>
       )}
 
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div
+          className="rounded-2xl p-4"
+          style={{ background: 'var(--bg-surface)', border: `1px solid ${blockchainTone.border}` }}
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Server size={15} style={{ color: blockchainTone.text }} />
+              <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                Blockchain Service Health
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={{ background: blockchainTone.bg, border: `1px solid ${blockchainTone.border}`, color: blockchainTone.text }}>
+              {(blockchainServiceHealth?.status ?? '').toUpperCase() === 'UP' ? <Wifi size={9} /> : <WifiOff size={9} />}
+              {blockchainServiceLoading ? 'Checking…' : (blockchainServiceHealth?.status ?? 'DOWN')}
+            </span>
+          </div>
+          <div className="space-y-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+            <p>Mode: <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{blockchainServiceHealth?.mode?.replace(/_/g, ' ') ?? '—'}</span></p>
+            <p>{blockchainServiceHealth?.message ?? 'Waiting for blockchain service health response.'}</p>
+          </div>
+        </div>
+
+        <div
+          className="rounded-2xl p-4"
+          style={{ background: 'var(--bg-surface)', border: `1px solid ${fraudTone.border}` }}
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} style={{ color: fraudTone.text }} />
+              <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+                Fraud Service Health
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={{ background: fraudTone.bg, border: `1px solid ${fraudTone.border}`, color: fraudTone.text }}>
+              {(fraudServiceHealth?.status ?? '').toUpperCase() === 'UP' ? <Wifi size={9} /> : <WifiOff size={9} />}
+              {fraudServiceLoading ? 'Checking…' : (fraudServiceHealth?.status ?? 'DOWN')}
+            </span>
+          </div>
+          <div className="space-y-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+            <p>Service: <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{fraudServiceHealth?.service ?? 'fraud-service'}</span></p>
+            <p>Version: <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{fraudServiceHealth?.version ?? '—'}</span></p>
+            <p>Mode: <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{fraudServiceHealth?.mode ?? '—'}</span></p>
+          </div>
+        </div>
+      </div>
+
       {/* ── Charts ─────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
         {/* Transaction Volume */}
@@ -201,26 +307,37 @@ export default function OverviewPage() {
           {statsLoading ? (
             <div className="skeleton h-[200px] rounded-xl" />
           ) : (
+            hasTransactions ? (
             <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={volumeData} margin={{ top: 2, right: 4, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="gradCount" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#2563EB" stopOpacity={0.12} />
-                    <stop offset="95%" stopColor="#2563EB" stopOpacity={0}    />
-                  </linearGradient>
-                  <linearGradient id="gradAmount" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#0EA5E9" stopOpacity={0.12} />
-                    <stop offset="95%"  stopColor="#0EA5E9" stopOpacity={0}   />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" vertical={false} />
-                <XAxis dataKey="day" tick={{ fill: '#64748B', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: '#64748B', fontSize: 11 }} axisLine={false} tickLine={false} width={32} />
-                <Tooltip content={<ChartTooltip />} />
-                <Area type="monotone" dataKey="count"  name="Transactions" stroke="#2563EB" strokeWidth={2} fill="url(#gradCount)"  dot={false} activeDot={{ r: 4, fill: '#2563EB', strokeWidth: 0 }} />
-                <Area type="monotone" dataKey="amount" name="Amount ($)"   stroke="#0EA5E9" strokeWidth={2} fill="url(#gradAmount)" dot={false} activeDot={{ r: 4, fill: '#0EA5E9', strokeWidth: 0 }} />
-              </AreaChart>
-            </ResponsiveContainer>
+                <AreaChart data={volumeData} margin={{ top: 2, right: 8, left: -16, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gradCount" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#2563EB" stopOpacity={0.14} />
+                      <stop offset="95%" stopColor="#2563EB" stopOpacity={0}    />
+                    </linearGradient>
+                    <linearGradient id="gradAmount" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#0EA5E9" stopOpacity={0.14} />
+                      <stop offset="95%" stopColor="#0EA5E9" stopOpacity={0}   />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="day" tick={{ fill: '#64748B', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  {/* Left axis — transaction count */}
+                  <YAxis yAxisId="left"  tick={{ fill: '#64748B', fontSize: 11 }} axisLine={false} tickLine={false} width={28} />
+                  {/* Right axis — amount (abbreviated) */}
+                  <YAxis yAxisId="right" orientation="right" tick={{ fill: '#64748B', fontSize: 11 }} axisLine={false} tickLine={false} width={40}
+                    tickFormatter={(v: number) => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(1)}M` : v >= 1_000 ? `$${(v/1_000).toFixed(0)}K` : `$${v}`}
+                  />
+                  <Tooltip content={<ChartTooltip />} />
+                  <Area yAxisId="left"  type="monotone" dataKey="count"  name="Transactions" stroke="#2563EB" strokeWidth={2} fill="url(#gradCount)"  dot={false} activeDot={{ r: 4, fill: '#2563EB', strokeWidth: 0 }} />
+                  <Area yAxisId="right" type="monotone" dataKey="amount" name="Amount ($)"   stroke="#0EA5E9" strokeWidth={2} fill="url(#gradAmount)" dot={false} activeDot={{ r: 4, fill: '#0EA5E9', strokeWidth: 0 }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-[200px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400">
+                No transactions found for the selected tenant.
+              </div>
+            )
           )}
         </div>
 
@@ -236,26 +353,34 @@ export default function OverviewPage() {
           {statsLoading ? (
             <div className="skeleton h-[200px] rounded-xl" />
           ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <PieChart>
-                <Pie data={fraudDistribution} cx="50%" cy="44%" innerRadius={52} outerRadius={76} paddingAngle={3} dataKey="value">
-                  {fraudDistribution.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} strokeWidth={0} />
-                  ))}
-                </Pie>
-                <Legend
-                  iconType="circle"
-                  iconSize={7}
-                  formatter={(value) => (
-                    <span style={{ color: '#64748B', fontSize: '11px' }}>{value}</span>
-                  )}
-                />
-                <Tooltip
-                  formatter={(value) => [`${value}%`, '']}
-                  contentStyle={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '12px', fontSize: '12px' }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            hasTransactions && hasFraudDistribution ? (
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie data={fraudDistribution} cx="50%" cy="44%" innerRadius={52} outerRadius={76} paddingAngle={3} dataKey="value">
+                    {fraudDistribution.map((entry) => (
+                      <Cell key={entry.name} fill={entry.color} strokeWidth={0} />
+                    ))}
+                  </Pie>
+                  <Legend
+                    iconType="circle"
+                    iconSize={7}
+                    formatter={(value) => (
+                      <span style={{ color: '#64748B', fontSize: '11px' }}>{value}</span>
+                    )}
+                  />
+                  <Tooltip
+                    formatter={(value, name, props) => [
+                      `${value}% (${(props.payload as typeof fraudDistribution[0]).raw} txns)`, ''
+                    ]}
+                    contentStyle={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: '12px', fontSize: '12px' }}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-[200px] items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-400">
+                No fraud data available yet.
+              </div>
+            )
           )}
         </div>
       </div>
@@ -270,7 +395,7 @@ export default function OverviewPage() {
             <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Recent Transactions</p>
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] mt-1" style={{ color: 'var(--text-muted)' }}>Latest activity</p>
           </div>
-          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Last 8</span>
+          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Last {Math.min(8, totalTransactions)}</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -283,7 +408,7 @@ export default function OverviewPage() {
               </tr>
             </thead>
             <tbody>
-              {recentLoading
+              {recentTransactionsLoading
                 ? Array.from({ length: 6 }).map((_, i) => (
                     <tr key={i}>
                       {Array.from({ length: 6 }).map((__, j) => (
@@ -304,8 +429,8 @@ export default function OverviewPage() {
                 : recentTxs.map((tx) => (
                     <tr key={tx.transactionId}>
                       <td><span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{truncate(tx.transactionId, 8, 4)}</span></td>
-                      <td><span className="font-mono text-[11px]" style={{ color: 'var(--text-secondary)' }}>{truncate(tx.fromAccount, 6, 4)}</span></td>
-                      <td><span className="font-mono text-[11px]" style={{ color: 'var(--text-secondary)' }}>{truncate(tx.toAccount, 6, 4)}</span></td>
+                     <td><span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }} title={tx.fromAccount}>{formatAccountNumber(tx.fromAccount)}</span></td>
+                      <td><span className="font-mono text-[11px]" style={{ color: 'var(--text-secondary)' }} title={tx.toAccount}>{formatAccountNumber(tx.toAccount)}</span></td>
                       <td><span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{formatCurrency(tx.amount, tx.currency)}</span></td>
                       <td><Badge variant={statusVariant(tx.status)} size="sm">{tx.status.replace(/_/g, ' ')}</Badge></td>
                       <td><span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{formatDate(tx.createdAt, 'MMM dd HH:mm')}</span></td>
@@ -317,12 +442,12 @@ export default function OverviewPage() {
       </div>
 
       {/* ── Stats summary row ──────────────────────────────────────────────── */}
-      {!statsLoading && stats && (
+      {!statsLoading && (
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           {[
-            { icon: <CheckCircle2 size={18} />, value: stats.totalCompleted, label: 'Completed',  color: '#16A34A', iconBg: '#F0FDF4' },
-            { icon: <ShieldX size={18} />,       value: stats.totalFailed,   label: 'Failed',     color: '#DC2626', iconBg: '#FEF2F2' },
-            { icon: <Clock size={18} />,          value: stats.totalSubmitted, label: 'Submitted', color: '#D97706', iconBg: '#FFFBEB' },
+            { icon: <CheckCircle2 size={18} />, value: transactionCounts.completed, label: 'Completed',  color: '#16A34A', iconBg: '#F0FDF4' },
+            { icon: <ShieldX size={18} />,       value: transactionCounts.failed,   label: 'Failed',     color: '#DC2626', iconBg: '#FEF2F2' },
+            { icon: <Clock size={18} />,          value: transactionCounts.submitted, label: 'Submitted', color: '#D97706', iconBg: '#FFFBEB' },
           ].map(({ icon, value, label, color, iconBg }) => (
             <div
               key={label}

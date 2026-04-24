@@ -48,18 +48,14 @@ public class GatewayConfig {
                 .uri("http://tenant-service:8082")
             )
 
-            // Transaction Service with rate limiting
+            // Transaction Service
             .route("transaction-service", r -> r
                 .path("/api/v1/transactions/**")
                 .filters(f -> f
                     .preserveHostHeader()
                     .filter(tenantAuthGatewayFilterFactory.apply(new TenantAuthGatewayFilterFactory.Config()))
-                    .requestRateLimiter(config -> config
-                        .setRateLimiter(redisRateLimiter)
-                        .setKeyResolver(new org.springframework.cloud.gateway.filter.ratelimit.PrincipalNameKeyResolver())
-                    )
                     .retry(config -> config
-                        .setRetries(3)
+                        .setRetries(2)
                         .setMethods(
                             org.springframework.http.HttpMethod.GET
                         )

@@ -14,6 +14,8 @@ import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Locale;
+
 /**
  * Consumes {@link FraudAlertEvent} messages from the {@code fraud.alert} Kafka topic.
  *
@@ -28,18 +30,19 @@ public class FraudResultConsumer {
 
     private final TransactionRepository transactionRepository;
 
-    /**
-     * Consume a {@link FraudAlertEvent} and update the associated transaction.
-     *
-     * <p>If the event's {@code shouldBlock} flag is {@code true} the transaction is
-     * transitioned to {@link TransactionStatus#BLOCKED}; otherwise it is left on
-     * {@link TransactionStatus#FRAUD_HOLD} pending manual review.</p>
-     *
-     * @param event           the deserialized fraud alert event
-     * @param partition       Kafka partition (for logging)
-     * @param offset          Kafka offset (for logging)
-     * @param acknowledgment  manual acknowledgment handle
-     */
+        /**
+         * Consume a {@link FraudAlertEvent} and update the associated transaction.
+         *
+         * <p>Blocking recommendations such as {@code BLOCK} or
+         * {@code BLOCK_TRANSACTION} transition the transaction to
+         * {@link TransactionStatus#BLOCKED}; all other recommendations leave it on
+         * {@link TransactionStatus#FRAUD_HOLD} pending manual review.
+         *
+         * @param event           the deserialized fraud alert event
+         * @param partition       Kafka partition (for logging)
+         * @param offset          Kafka offset (for logging)
+         * @param acknowledgment  manual acknowledgment handle
+         */
     @KafkaListener(
             topics = "fraud.alert",
             groupId = "transaction-service",
@@ -78,7 +81,7 @@ public class FraudResultConsumer {
         tx.setFraudScore(event.getFraudScore());
         tx.setFraudRiskLevel(event.getRiskLevel());
 
-        if ("BLOCK".equals(event.getRecommendation())) {
+                if (isBlockingRecommendation(event.getRecommendation())) {
             tx.setStatus(TransactionStatus.BLOCKED);
             tx.setRejectionReason(
                     "Fraud engine escalated to BLOCKED: " + event.getRecommendation());
@@ -92,4 +95,15 @@ public class FraudResultConsumer {
         log.debug("Transaction {} updated with fraud result: score={} riskLevel={}",
                 tx.getTransactionId(), event.getFraudScore(), event.getRiskLevel());
     }
+
+        private boolean isBlockingRecommendation(String recommendation) {
+                if (recommendation == null) {
+                        return false;
+                }
+
+                return switch (recommendation.trim().toUpperCase(Locale.ROOT)) {
+                        case "BLOCK", "BLOCK_TRANSACTION", "BLOCKED" -> true;
+                        default -> false;
+                };
+        }
 }

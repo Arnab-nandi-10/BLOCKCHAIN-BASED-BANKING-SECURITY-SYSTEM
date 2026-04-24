@@ -5,6 +5,7 @@ from fastapi import APIRouter, Response, status
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.config import settings
 from app.services.scoring_service import scoring_service
 
 logger = structlog.get_logger(__name__)
@@ -29,7 +30,7 @@ async def health_check() -> Dict:
     return {
         "status": "UP",
         "service": "fraud-detection",
-        "version": "1.0.0",
+        "version": settings.APP_VERSION,
     }
 
 

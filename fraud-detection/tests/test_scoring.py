@@ -1,36 +1,55 @@
-"""pytest test suite for the BBSS Fraud Detection scoring pipeline.
+from __future__ import annotations
 
-All tests mock the FraudModel at the sklearn level so no real model artifact
-is required.  Two model fixtures are provided:
+from datetime import datetime, timezone
 
-  mock_model_low_risk   — predict_proba always returns [[0.95, 0.05]]  (score ≈ 0.05)
-  mock_model_high_risk  — predict_proba always returns [[0.05, 0.95]]  (score ≈ 0.95)
-
-A third fixture (mock_model_real) trains a tiny real RandomForest on 200
-synthetic samples for structural / integration tests that need a genuine
-estimator.
-"""
-
-from typing import List
-from unittest.mock import MagicMock
-
-import numpy as np
 import pytest
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
 
-from app.models.fraud_model import FraudModel
 from app.models.schemas import FraudScoreRequest, FraudScoreResponse
-from app.services.feature_engineering import FeatureEngineer
+from app.services.behavioral_engine import BehavioralEngine
+from app.services.decision_engine import DecisionEngine
+from app.services.explainability import ExplainabilityService
+from app.services.feature_engineering import FEATURE_NAMES, FeatureEngineer, TOTAL_FEATURES
+from app.services.history_repository import HistoryRepository
+from app.services.rule_engine import RuleEngine
+from app.services.risk_context import HistorySummary, StoredAssessment
 from app.services.scoring_service import ScoringService
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+class FakeModel:
+    def __init__(self, score: float = 0.05, *, should_fail: bool = False) -> None:
+        self.score = score
+        self.should_fail = should_fail
+        self.version = "test-model-v1"
+
+    def predict(self, raw_features):  # type: ignore[no-untyped-def]
+        if self.should_fail:
+            raise RuntimeError("model unavailable")
+        return self.score
+
+    def is_loaded(self) -> bool:
+        return True
+
+
+class FakeHistoryRepository(HistoryRepository):
+    def __init__(self, history: HistorySummary | None = None) -> None:
+        self.history = history or HistorySummary()
+        self.saved: list[tuple[str, FraudScoreResponse]] = []
+        self.existing: StoredAssessment | None = None
+
+    def get_existing_assessment(self, transaction_id: str) -> StoredAssessment | None:
+        return self.existing
+
+    def build_history_summary(self, tx):  # type: ignore[no-untyped-def]
+        return self.history
+
+    def save_assessment(self, tx, feature_vector, response):  # type: ignore[no-untyped-def]
+        self.saved.append((tx.transaction_id, response))
+
+    def list_alerts(self, tenant_id: str, page: int, size: int):  # type: ignore[no-untyped-def]
+        return [], 0
+
 
 def make_request(**overrides) -> FraudScoreRequest:
-    """Return a FraudScoreRequest with sensible defaults, overridden by kwargs."""
     defaults = {
         "transactionId": "txn-test-001",
         "tenantId": "tenant-alpha",
@@ -39,254 +58,208 @@ def make_request(**overrides) -> FraudScoreRequest:
         "amount": 100.0,
         "currency": "USD",
         "transactionType": "TRANSFER",
+        "transactionTimestamp": datetime(2026, 4, 22, 14, 30, tzinfo=timezone.utc),
+        "metadata": {"customerId": "cust-001", "channel": "WEB"},
     }
     defaults.update(overrides)
     return FraudScoreRequest(**defaults)
 
 
-# ---------------------------------------------------------------------------
-# Model fixtures
-# ---------------------------------------------------------------------------
-
-def _make_mock_model(fraud_proba: float) -> FraudModel:
-    """Build a FraudModel whose predict_proba always returns *fraud_proba* for
-    the fraud class, regardless of input features."""
-    model = FraudModel.__new__(FraudModel)
-    model._loaded = True
-    model._model_path = ""
-    model._scaler_path = ""
-
-    # Scaler: transform is identity (returns zeros of same shape)
-    mock_scaler = MagicMock(spec=StandardScaler)
-    mock_scaler.transform = MagicMock(
-        side_effect=lambda x: np.zeros_like(x)
-    )
-    model.scaler = mock_scaler
-
-    # Classifier: predict_proba returns fixed probabilities
-    mock_clf = MagicMock(spec=RandomForestClassifier)
-    mock_clf.predict_proba = MagicMock(
-        return_value=np.array([[1.0 - fraud_proba, fraud_proba]])
-    )
-    model.model = mock_clf
-
-    return model
+def make_service(
+    *,
+    model: FakeModel | None = None,
+    history: HistorySummary | None = None,
+) -> tuple[ScoringService, FakeHistoryRepository]:
+    repository = FakeHistoryRepository(history)
+    service = ScoringService.__new__(ScoringService)
+    service.model = model or FakeModel()
+    service.feature_engineer = FeatureEngineer()
+    service.rule_engine = RuleEngine()
+    service.behavioral_engine = BehavioralEngine()
+    service.decision_engine = DecisionEngine()
+    service.explainability = ExplainabilityService()
+    service.history_repository = repository
+    return service, repository
 
 
-@pytest.fixture
-def mock_model_low_risk() -> FraudModel:
-    """FraudModel that always predicts a very low fraud probability (≈ 0.05)."""
-    return _make_mock_model(fraud_proba=0.05)
+def test_score_low_amount_transaction_returns_allow() -> None:
+    service, repository = make_service(model=FakeModel(score=0.05))
 
-
-@pytest.fixture
-def mock_model_high_risk() -> FraudModel:
-    """FraudModel that always predicts a very high fraud probability (≈ 0.95)."""
-    return _make_mock_model(fraud_proba=0.95)
-
-
-@pytest.fixture
-def mock_model_real() -> FraudModel:
-    """FraudModel backed by a genuine but tiny RandomForestClassifier (200 samples,
-    50 features).  Used for structural tests that require a real estimator."""
-    rng = np.random.RandomState(99)
-    n_samples = 200
-    n_features = 50
-
-    X = rng.randn(n_samples, n_features)
-    y = (rng.random(n_samples) < 0.15).astype(int)
-
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    clf = RandomForestClassifier(n_estimators=5, max_depth=4, random_state=99)
-    clf.fit(X_scaled, y)
-
-    model = FraudModel.__new__(FraudModel)
-    model.model = clf
-    model.scaler = scaler
-    model._loaded = True
-    model._model_path = ""
-    model._scaler_path = ""
-    return model
-
-
-# ---------------------------------------------------------------------------
-# ScoringService fixture factory
-# ---------------------------------------------------------------------------
-
-def _make_scoring_svc(model: FraudModel) -> ScoringService:
-    svc = ScoringService.__new__(ScoringService)
-    svc.model = model
-    svc.feature_engineer = FeatureEngineer()
-    svc._kafka_producer = None
-    return svc
-
-
-# ---------------------------------------------------------------------------
-# Test 1 — low-amount transaction
-# ---------------------------------------------------------------------------
-
-def test_score_low_amount_transaction(mock_model_low_risk: FraudModel) -> None:
-    """A small, routine transfer should return LOW risk and APPROVE recommendation."""
-    svc = _make_scoring_svc(mock_model_low_risk)
-    request = make_request(amount=50.0, transactionType="TRANSFER", currency="USD")
-
-    result: FraudScoreResponse = svc.score_transaction(request)
+    result = service.score_transaction(make_request(amount=50.0))
 
     assert isinstance(result, FraudScoreResponse)
-    assert 0.0 <= result.score <= 1.0
+    assert result.score == pytest.approx(0.05, rel=1e-3)
     assert result.riskLevel == "LOW"
-    assert result.recommendation == "APPROVE"
+    assert result.decision == "ALLOW"
+    assert result.recommendation == "ALLOW"
     assert result.shouldBlock is False
-    assert result.processingTimeMs >= 0.0
+    assert result.reviewRequired is False
+    assert result.fallbackUsed is False
+    assert repository.saved, "Expected assessment to be persisted"
 
 
-# ---------------------------------------------------------------------------
-# Test 2 — high-amount transaction
-# ---------------------------------------------------------------------------
-
-def test_score_high_amount_transaction(mock_model_high_risk: FraudModel) -> None:
-    """A very large transfer with a high fraud score should return HIGH/CRITICAL."""
-    svc = _make_scoring_svc(mock_model_high_risk)
-    request = make_request(amount=900_000.0, transactionType="TRANSFER")
-
-    result: FraudScoreResponse = svc.score_transaction(request)
-
-    assert isinstance(result, FraudScoreResponse)
-    assert result.score >= 0.8, "Expected score >= 0.8 for mock_model_high_risk"
-    assert result.riskLevel in ("HIGH", "CRITICAL")
-    assert result.shouldBlock is True
-    assert result.recommendation == "BLOCK_TRANSACTION"
-
-    # Feature-based rules should have fired for the high amount
-    assert "EXTREMELY_HIGH_AMOUNT" in result.triggeredRules
-    assert "LARGE_AMOUNT_TRANSFER" in result.triggeredRules
-
-
-# ---------------------------------------------------------------------------
-# Test 3 — response structure validation
-# ---------------------------------------------------------------------------
-
-def test_score_response_structure(mock_model_real: FraudModel) -> None:
-    """FraudScoreResponse must have all required fields with the correct Python types."""
-    svc = _make_scoring_svc(mock_model_real)
-    result: FraudScoreResponse = svc.score_transaction(make_request())
-
-    # Field presence
-    assert hasattr(result, "transactionId")
-    assert hasattr(result, "score")
-    assert hasattr(result, "riskLevel")
-    assert hasattr(result, "triggeredRules")
-    assert hasattr(result, "recommendation")
-    assert hasattr(result, "shouldBlock")
-    assert hasattr(result, "processingTimeMs")
-
-    # Types
-    assert isinstance(result.transactionId, str)
-    assert isinstance(result.score, float)
-    assert isinstance(result.riskLevel, str)
-    assert isinstance(result.triggeredRules, list)
-    assert isinstance(result.recommendation, str)
-    assert isinstance(result.shouldBlock, bool)
-    assert isinstance(result.processingTimeMs, float)
-
-    # Value constraints
-    assert 0.0 <= result.score <= 1.0
-    assert result.riskLevel in ("LOW", "MEDIUM", "HIGH", "CRITICAL")
-    assert result.recommendation in (
-        "APPROVE",
-        "ADDITIONAL_VERIFICATION",
-        "MANUAL_REVIEW",
-        "BLOCK_TRANSACTION",
+def test_score_weighted_behavioral_and_rule_signals_hold_transaction() -> None:
+    history = HistorySummary(
+        total_transactions=20,
+        avg_amount=25_000.0,
+        amount_stddev=8_000.0,
+        avg_daily_transactions=4.0,
+        recent_10m_count=5,
+        recent_1h_count=8,
+        recent_24h_count=12,
+        recent_24h_total_amount=180_000.0,
+        near_threshold_24h_count=4,
+        receiver_seen_count=0,
+        recent_unique_receivers=3,
+        seen_device_before=False,
+        seen_ip_before=False,
+        seen_country_before=True,
+        night_ratio=0.02,
+        weekend_ratio=0.10,
+        cross_border_ratio=0.02,
+        last_transaction_at=datetime(2026, 4, 20, 11, 0, tzinfo=timezone.utc),
+        first_transaction_at=datetime(2025, 12, 1, 9, 0, tzinfo=timezone.utc),
     )
-    assert result.processingTimeMs >= 0.0
-    assert result.transactionId == "txn-test-001"
+    service, _ = make_service(model=FakeModel(score=0.42), history=history)
+    request = make_request(
+        amount=120_000.0,
+        currency="XMR",
+        transactionTimestamp=datetime(2026, 4, 22, 2, 10, tzinfo=timezone.utc),
+        metadata={
+            "customerId": "cust-001",
+            "receiverVerified": "false",
+            "walletRiskLevel": "HIGH",
+            "deviceId": "device-new",
+            "originCountry": "IN",
+            "destinationCountry": "IR",
+            "travelRuleReceived": "false",
+        },
+    )
+
+    result = service.score_transaction(request)
+
+    assert result.score > 0.6
+    assert result.riskLevel in {"HIGH", "CRITICAL"}
+    assert result.decision in {"HOLD", "BLOCK"}
+    assert "velocity_spike" in result.triggeredRules
+    assert "new_receiver" in result.triggeredRules
+    assert any("higher than the customer's usual average" in text for text in result.explanations)
 
 
-# ---------------------------------------------------------------------------
-# Test 4 — feature extraction shape
-# ---------------------------------------------------------------------------
+def test_sanctions_signal_blocks_even_with_low_ml_score() -> None:
+    service, _ = make_service(model=FakeModel(score=0.10))
+    request = make_request(
+        amount=5_000.0,
+        metadata={"customerId": "cust-001", "sanctionsHit": "true"},
+    )
 
-def test_feature_extraction() -> None:
-    """FeatureEngineer.extract_features must return a float64 ndarray of shape (50,)."""
+    result = service.score_transaction(request)
+
+    assert result.riskLevel == "CRITICAL"
+    assert result.decision == "BLOCK"
+    assert result.shouldBlock is True
+    assert "sanctions_or_watchlist_match" in result.triggeredRules
+
+
+def test_model_failure_uses_neutral_fallback_and_review() -> None:
+    service, _ = make_service(model=FakeModel(score=0.0, should_fail=True))
+
+    result = service.score_transaction(make_request(amount=500.0))
+
+    assert result.fallbackUsed is True
+    assert result.decision == "HOLD"
+    assert result.reviewRequired is True
+    assert result.score >= 0.5
+    assert "ml_model_fallback" in result.triggeredRules or "fraud_service_fallback" in result.triggeredRules
+
+
+def test_feature_extraction_shape_and_same_account_flag() -> None:
     engineer = FeatureEngineer()
     request = make_request()
+    normalized = engineer.normalize_request(request)
+    features = engineer.extract_features(normalized, HistorySummary())
 
-    features = engineer.extract_features(request)
+    assert features.shape == (TOTAL_FEATURES,)
+    assert features.dtype.name == "float64"
 
-    assert isinstance(features, np.ndarray), "Expected np.ndarray"
-    assert features.shape == (50,), f"Expected shape (50,), got {features.shape}"
-    assert features.dtype == np.float64, f"Expected float64, got {features.dtype}"
-
-    # Spot-check: same_account feature (index 11) should be 0 for different accounts
-    assert features[11] == 0.0, "same_account feature should be 0 for different accounts"
-
-    # Spot-check: same-account transaction
-    same_acc_request = make_request(fromAccount="ACC-SAME", toAccount="ACC-SAME")
-    same_features = engineer.extract_features(same_acc_request)
-    assert same_features[11] == 1.0, "same_account feature should be 1 when accounts match"
+    same_account = make_request(fromAccount="ACC-SAME", toAccount="ACC-SAME")
+    same_normalized = engineer.normalize_request(same_account)
+    same_features = engineer.extract_features(same_normalized, HistorySummary())
+    assert same_features[20] == 1.0, "same-account feature should be set"
 
 
-# ---------------------------------------------------------------------------
-# Test 5 — risk level thresholds
-# ---------------------------------------------------------------------------
+def test_decision_engine_thresholds() -> None:
+    engine = DecisionEngine()
 
-def test_risk_levels() -> None:
-    """FraudModel.get_risk_level must map score ranges to the correct labels."""
-    model = FraudModel()
-
-    # LOW: [0.0, 0.3)
-    assert model.get_risk_level(0.0) == "LOW"
-    assert model.get_risk_level(0.10) == "LOW"
-    assert model.get_risk_level(0.299) == "LOW"
-
-    # MEDIUM: [0.3, 0.5)
-    assert model.get_risk_level(0.3) == "MEDIUM"
-    assert model.get_risk_level(0.40) == "MEDIUM"
-    assert model.get_risk_level(0.499) == "MEDIUM"
-
-    # HIGH: [0.5, 0.8)
-    assert model.get_risk_level(0.5) == "HIGH"
-    assert model.get_risk_level(0.65) == "HIGH"
-    assert model.get_risk_level(0.799) == "HIGH"
-
-    # CRITICAL: [0.8, 1.0]
-    assert model.get_risk_level(0.8) == "CRITICAL"
-    assert model.get_risk_level(0.95) == "CRITICAL"
-    assert model.get_risk_level(1.0) == "CRITICAL"
+    assert engine.evaluate(0.10).decision == "ALLOW"
+    assert engine.evaluate(0.45).decision == "MONITOR"
+    assert engine.evaluate(0.75).decision == "HOLD"
+    assert engine.evaluate(0.95).decision == "BLOCK"
 
 
-# ---------------------------------------------------------------------------
-# Test 6 — triggered rule derivation
-# ---------------------------------------------------------------------------
+def test_force_review_preserves_risk_band() -> None:
+    engine = DecisionEngine()
 
-def test_triggered_rules_large_transfer() -> None:
-    """LARGE_AMOUNT_TRANSFER and EXTREMELY_HIGH_AMOUNT rules must fire for big transfers."""
+    outcome = engine.evaluate(0.72, force_review=True)
+
+    assert outcome.risk_level == "HIGH"
+    assert outcome.decision == "HOLD"
+    assert outcome.review_required is True
+
+
+def test_sparse_history_and_suspicious_account_pattern_add_weighted_signals() -> None:
+    history = HistorySummary(
+        total_transactions=3,
+        avg_amount=6_000.0,
+        amount_stddev=2_000.0,
+        avg_daily_transactions=1.5,
+        receiver_seen_count=0,
+    )
+    service, _ = make_service(model=FakeModel(score=0.20), history=history)
+    request = make_request(
+        amount=30_000.0,
+        toAccount="MULE-0000-1234",
+        metadata={
+            "customerId": "cust-001",
+            "receiverVerified": "false",
+            "receiverAgeDays": "4",
+        },
+    )
+
+    result = service.score_transaction(request)
+
+    assert "adaptive_amount_spike" in result.triggeredRules
+    assert "suspicious_account_pattern" in result.triggeredRules
+    assert "new_receiver" in result.triggeredRules
+    assert result.score > 0.3
+
+
+def test_high_risk_currency_shift_requires_behavioral_context() -> None:
+    history = HistorySummary(
+        total_transactions=12,
+        avg_amount=2_000.0,
+        amount_stddev=750.0,
+        avg_daily_transactions=2.0,
+        high_risk_currency_ratio=0.0,
+    )
+    service, _ = make_service(model=FakeModel(score=0.18), history=history)
+    request = make_request(
+        amount=2_500.0,
+        currency="XMR",
+        metadata={"customerId": "cust-001"},
+    )
+
+    result = service.score_transaction(request)
+
+    assert "high_risk_currency_shift" in result.triggeredRules
+
+
+def test_non_high_risk_currency_does_not_set_high_risk_feature_flag() -> None:
     engineer = FeatureEngineer()
+    request = make_request(currency="AUD")
 
-    request = make_request(amount=900_000.0, transactionType="TRANSFER")
-    rules: List[str] = engineer.get_triggered_rules(request, score=0.9)
+    normalized = engineer.normalize_request(request)
+    features = engineer.extract_features(normalized, HistorySummary())
 
-    assert "EXTREMELY_HIGH_AMOUNT" in rules
-    assert "LARGE_AMOUNT_TRANSFER" in rules
-
-
-def test_triggered_rules_high_risk_currency() -> None:
-    """HIGH_RISK_CURRENCY must fire for non USD/EUR/GBP currencies."""
-    engineer = FeatureEngineer()
-
-    request = make_request(currency="XYZ")
-    rules: List[str] = engineer.get_triggered_rules(request, score=0.1)
-
-    assert "HIGH_RISK_CURRENCY" in rules
-
-
-def test_triggered_rules_same_account() -> None:
-    """SUSPICIOUS_ACCOUNT_PATTERN must fire when fromAccount == toAccount."""
-    engineer = FeatureEngineer()
-
-    request = make_request(fromAccount="ACC-LOOP", toAccount="ACC-LOOP")
-    rules: List[str] = engineer.get_triggered_rules(request, score=0.2)
-
-    assert "SUSPICIOUS_ACCOUNT_PATTERN" in rules
+    assert features[FEATURE_NAMES.index("currency_low_risk")] == 0.0
+    assert features[FEATURE_NAMES.index("currency_high_risk")] == 0.0

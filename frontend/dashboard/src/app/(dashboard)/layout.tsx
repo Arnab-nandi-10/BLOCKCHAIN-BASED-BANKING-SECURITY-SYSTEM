@@ -113,7 +113,7 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
               <ShieldCheck size={17} className="text-white" />
             </div>
             <div>
-              <p className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>BBSS</p>
+              <p className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Civic Savings</p>
               <p className="text-[10px] leading-tight" style={{ color: 'var(--text-muted)' }}>Security Platform</p>
             </div>
           </div>

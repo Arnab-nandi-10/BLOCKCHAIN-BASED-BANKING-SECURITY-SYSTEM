@@ -211,7 +211,7 @@ verify_channel() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
-    log_section "BBSS — Channel Setup"
+    log_section "Civic Savings — Channel Setup"
 
     create_channel
     join_all_peers

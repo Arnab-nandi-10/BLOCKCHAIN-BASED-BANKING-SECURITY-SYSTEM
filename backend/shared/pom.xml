@@ -24,9 +24,9 @@
          into a fat/executable jar.
     ───────────────────────────────────────────── -->
     <artifactId>shared</artifactId>
-    <name>BBSS :: Shared</name>
+    <name>Civic Savings :: Shared</name>
     <description>
-        Cross-cutting library shared by all BBSS microservices.
+        Cross-cutting library shared by all Civic Savings microservices.
         Contains DTOs, domain events, exception hierarchy, security
         utilities and Spring MVC auto-configuration.
     </description>

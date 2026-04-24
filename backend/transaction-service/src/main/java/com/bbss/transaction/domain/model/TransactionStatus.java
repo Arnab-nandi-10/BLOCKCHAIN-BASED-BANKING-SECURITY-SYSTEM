@@ -17,7 +17,7 @@ public enum TransactionStatus {
     PENDING_FRAUD_CHECK,
 
     /**
-     * Transaction passed fraud checks and has been written to the blockchain.
+     * Transaction passed fraud checks. Ledger anchoring is tracked separately by {@link LedgerStatus}.
      */
     VERIFIED,
 

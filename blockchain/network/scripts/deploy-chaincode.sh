@@ -279,7 +279,7 @@ deploy_chaincode() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
-    log_section "BBSS — Chaincode Deployment"
+    log_section "Civic Savings — Chaincode Deployment"
 
     # Deploy transaction-cc
     deploy_chaincode \
@@ -303,11 +303,11 @@ main() {
     log_info ""
     log_info "  # Create a transaction"
     log_info "  peer chaincode invoke -C ${CHANNEL_ID} -n transaction-cc \\"
-    log_info "    -c '{\"Args\":[\"CreateTransaction\",\"TX001\",\"TENANT1\",\"ACC001\",\"ACC002\",\"1000.00\",\"USD\",\"TRANSFER\",\"PENDING\"]}'"
+    log_info "    -c '{\"Args\":[\"CreateRecord\",\"{\\\"transactionId\\\":\\\"TX001\\\",\\\"tenantId\\\":\\\"TENANT1\\\",\\\"fromAccountMasked\\\":\\\"****0001\\\",\\\"toAccountMasked\\\":\\\"****0002\\\",\\\"amount\\\":\\\"1000.00\\\",\\\"currency\\\":\\\"USD\\\",\\\"transactionType\\\":\\\"TRANSFER\\\",\\\"status\\\":\\\"BLOCKED\\\",\\\"fraudScore\\\":\\\"0.91\\\",\\\"riskLevel\\\":\\\"HIGH\\\",\\\"decision\\\":\\\"BLOCK\\\",\\\"decisionReason\\\":\\\"Velocity threshold breached\\\",\\\"payload\\\":{\\\"transactionId\\\":\\\"TX001\\\",\\\"decision\\\":\\\"BLOCK\\\"}}\"]}'"
     log_info ""
     log_info "  # Create an audit entry"
     log_info "  peer chaincode invoke -C ${CHANNEL_ID} -n audit-cc \\"
-    log_info "    -c '{\"Args\":[\"CreateAuditEntry\",\"AUDIT001\",\"TENANT1\",\"TRANSACTION\",\"TX001\",\"CREATE\",\"USER1\",\"HUMAN\",\"10.0.0.1\",\"{}\"]}'"
-}
+    log_info "    -c '{\"Args\":[\"CreateAudit\",\"{\\\"auditId\\\":\\\"AUDIT001\\\",\\\"tenantId\\\":\\\"TENANT1\\\",\\\"entityType\\\":\\\"TRANSACTION\\\",\\\"entityId\\\":\\\"TX001\\\",\\\"action\\\":\\\"FRAUD_DECISION_RECORDED\\\",\\\"actorId\\\":\\\"FRAUD_ENGINE\\\",\\\"actorType\\\":\\\"SYSTEM\\\",\\\"transactionId\\\":\\\"TX001\\\",\\\"fraudScore\\\":\\\"0.91\\\",\\\"riskLevel\\\":\\\"HIGH\\\",\\\"decision\\\":\\\"BLOCK\\\",\\\"payload\\\":{\\\"transactionId\\\":\\\"TX001\\\",\\\"decision\\\":\\\"BLOCK\\\"}}\"]}'"
+  }
 
 main "$@"

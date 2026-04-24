@@ -1,7 +1,9 @@
 package com.bbss.audit.api;
 
 import com.bbss.audit.dto.AuditResponse;
+import com.bbss.audit.dto.AuditQueryFilters;
 import com.bbss.audit.dto.AuditSummaryResponse;
+import com.bbss.audit.domain.model.AuditStatus;
 import com.bbss.audit.service.AuditService;
 import com.bbss.shared.dto.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,7 +24,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 /**
  * REST API for querying the immutable audit trail.
@@ -58,10 +62,31 @@ public class AuditController {
     public ResponseEntity<ApiResponse<Page<AuditResponse>>> listAuditEntries(
             @Parameter(description = "Tenant identifier", required = true)
             @RequestHeader("X-Tenant-ID") String tenantId,
+            @RequestParam(required = false) String entityType,
+            @RequestParam(required = false) String entityId,
+            @RequestParam(required = false) String action,
+            @RequestParam(required = false) AuditStatus status,
+            @RequestParam(required = false) String verificationStatus,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate,
             @PageableDefault(size = 20, sort = "occurredAt") Pageable pageable) {
 
         log.debug("GET /api/v1/audit tenantId={} page={}", tenantId, pageable.getPageNumber());
-        Page<AuditResponse> page = auditService.listAuditEntries(tenantId, pageable);
+        Page<AuditResponse> page = auditService.listAuditEntries(
+                tenantId,
+                new AuditQueryFilters(
+                        entityType,
+                        entityId,
+                        action,
+                        status,
+                        verificationStatus,
+                        search,
+                        fromDate != null ? fromDate.atStartOfDay() : null,
+                        toDate != null ? toDate.atTime(LocalTime.MAX) : null
+                ),
+                pageable
+        );
         return ResponseEntity.ok(ApiResponse.success(page));
     }
 

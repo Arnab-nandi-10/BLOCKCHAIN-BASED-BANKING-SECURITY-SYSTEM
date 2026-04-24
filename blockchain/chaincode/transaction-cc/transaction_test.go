@@ -8,289 +8,178 @@ import (
 	"github.com/hyperledger/fabric-chaincode-go/pkg/cid"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	"github.com/hyperledger/fabric-chaincode-go/shimtest"
+	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// ---------------------------------------------------------------------------
-// Mock transaction context
-// ---------------------------------------------------------------------------
-
-// MockTransactionContext is a minimal implementation of
-// contractapi.TransactionContextInterface backed by a shimtest.MockStub.
-// It is used exclusively for unit-testing chaincode functions without
-// requiring a running Fabric peer.
 type MockTransactionContext struct {
 	stub *shimtest.MockStub
 }
 
-// GetStub satisfies contractapi.TransactionContextInterface.
 func (m *MockTransactionContext) GetStub() shim.ChaincodeStubInterface {
 	return m.stub
 }
 
-// GetClientIdentity satisfies contractapi.TransactionContextInterface.
-// Returns nil because no identity checks are performed in these tests.
 func (m *MockTransactionContext) GetClientIdentity() cid.ClientIdentity {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
-
-// newMockContext creates a fresh MockStub wired to a new TransactionChaincode
-// instance, begins a mock transaction, and returns a MockTransactionContext
-// ready for direct chaincode-function invocation.
 func newMockContext(t *testing.T, testName string) (*MockTransactionContext, *shimtest.MockStub) {
 	t.Helper()
-	cc := new(TransactionChaincode)
+	cc, err := contractapi.NewChaincode(&TransactionChaincode{})
+	if err != nil {
+		t.Fatalf("failed to create contract chaincode: %v", err)
+	}
 	stub := shimtest.NewMockStub(testName, cc)
 	stub.MockTransactionStart(fmt.Sprintf("txid-%s", testName))
-	// Set a deterministic timestamp so GetTxTimestamp() does not return nil.
 	stub.TxTimestamp = timestamppb.Now()
 	return &MockTransactionContext{stub: stub}, stub
 }
 
-// sampleTransaction returns the fixed parameters used across multiple tests.
-func sampleTransaction() (txID, tenantID, fromAcc, toAcc, amount, currency, txType, status string) {
-	return "TX-001", "TENANT-ALPHA", "ACC-1001", "ACC-2002", "5000.00", "USD", "TRANSFER", "PENDING"
+func sampleTransactionInput() TransactionRecordInput {
+	return TransactionRecordInput{
+		TransactionID:     "TX-001",
+		TenantID:          "TENANT-ALPHA",
+		FromAccountMasked: "******1001",
+		ToAccountMasked:   "******2002",
+		Amount:            "5000.00",
+		Currency:          "USD",
+		TransactionType:   "TRANSFER",
+		Status:            "BLOCKED",
+		FraudScore:        "0.92",
+		RiskLevel:         "HIGH",
+		Decision:          "BLOCK",
+		DecisionReason:    "Velocity breach",
+		Explanation:       "Blocked after fraud review",
+		Payload: `{
+			"transactionId":"TX-001",
+			"fraudScore":"0.92",
+			"riskLevel":"HIGH",
+			"decision":"BLOCK"
+		}`,
+		PreviousHash:      "prev-hash-001",
+		DecisionTimestamp: "2026-04-23T10:30:00Z",
+	}
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-// TestCreateTransaction verifies that CreateTransaction persists the record with
-// all expected field values and that the state is non-nil after the call.
-func TestCreateTransaction(t *testing.T) {
-	ctx, stub := newMockContext(t, "TestCreateTransaction")
-	cc := &TransactionChaincode{}
-
-	txID, tenantID, fromAcc, toAcc, amount, currency, txType, status := sampleTransaction()
-
-	record, err := cc.CreateTransaction(ctx, txID, tenantID, fromAcc, toAcc, amount, currency, txType, status)
+func marshalTransactionInput(t *testing.T, input TransactionRecordInput) string {
+	t.Helper()
+	value, err := json.Marshal(input)
 	if err != nil {
-		t.Fatalf("CreateTransaction returned unexpected error: %v", err)
+		t.Fatalf("failed to marshal transaction input: %v", err)
+	}
+	return string(value)
+}
+
+func TestCreateRecord(t *testing.T) {
+	ctx, stub := newMockContext(t, "TestCreateRecord")
+	cc := &TransactionChaincode{}
+	input := sampleTransactionInput()
+
+	record, err := cc.CreateRecord(ctx, marshalTransactionInput(t, input))
+	if err != nil {
+		t.Fatalf("CreateRecord returned unexpected error: %v", err)
 	}
 
-	// Verify returned struct fields.
-	if record.TransactionID != txID {
-		t.Errorf("TransactionID: got %q, want %q", record.TransactionID, txID)
+	if record.TransactionID != input.TransactionID {
+		t.Fatalf("TransactionID: got %q want %q", record.TransactionID, input.TransactionID)
 	}
-	if record.TenantID != tenantID {
-		t.Errorf("TenantID: got %q, want %q", record.TenantID, tenantID)
+	if record.Decision != input.Decision {
+		t.Fatalf("Decision: got %q want %q", record.Decision, input.Decision)
 	}
-	if record.FromAccount != fromAcc {
-		t.Errorf("FromAccount: got %q, want %q", record.FromAccount, fromAcc)
+	if record.PayloadHash == "" {
+		t.Fatal("PayloadHash must be populated")
 	}
-	if record.ToAccount != toAcc {
-		t.Errorf("ToAccount: got %q, want %q", record.ToAccount, toAcc)
+	if record.RecordHash == "" {
+		t.Fatal("RecordHash must be populated")
 	}
-	if record.Amount != amount {
-		t.Errorf("Amount: got %q, want %q", record.Amount, amount)
-	}
-	if record.Currency != currency {
-		t.Errorf("Currency: got %q, want %q", record.Currency, currency)
-	}
-	if record.Type != txType {
-		t.Errorf("Type: got %q, want %q", record.Type, txType)
-	}
-	if record.Status != status {
-		t.Errorf("Status: got %q, want %q", record.Status, status)
-	}
-	if record.DocType != "TRANSACTION" {
-		t.Errorf("DocType: got %q, want %q", record.DocType, "TRANSACTION")
-	}
-	if record.Hash == "" {
-		t.Error("Hash must not be empty after CreateTransaction")
-	}
-	if record.BlockchainTxID == "" {
-		t.Error("BlockchainTxID must not be empty after CreateTransaction")
-	}
-	if record.CreatedAt == "" {
-		t.Error("CreatedAt must not be empty after CreateTransaction")
-	}
-	if record.FraudRiskLevel != "UNKNOWN" {
-		t.Errorf("FraudRiskLevel: got %q, want %q", record.FraudRiskLevel, "UNKNOWN")
+	if record.PreviousHash != input.PreviousHash {
+		t.Fatalf("PreviousHash: got %q want %q", record.PreviousHash, input.PreviousHash)
 	}
 
-	// Verify that the state was written to the ledger.
-	stateBytes := stub.State[txID]
-	if stateBytes == nil {
-		t.Fatal("expected state to be non-nil after CreateTransaction, got nil")
+	state := stub.State[input.TransactionID]
+	if state == nil {
+		t.Fatal("expected state to be written to mock ledger")
 	}
 
-	var storedRecord TransactionRecord
-	if err := json.Unmarshal(stateBytes, &storedRecord); err != nil {
+	var stored TransactionRecord
+	if err := json.Unmarshal(state, &stored); err != nil {
 		t.Fatalf("failed to unmarshal stored state: %v", err)
 	}
-	if storedRecord.TransactionID != txID {
-		t.Errorf("stored TransactionID: got %q, want %q", storedRecord.TransactionID, txID)
+	if stored.Payload != `{"decision":"BLOCK","fraudScore":"0.92","riskLevel":"HIGH","transactionId":"TX-001"}` {
+		t.Fatalf("payload was not canonicalised: %s", stored.Payload)
 	}
 }
 
-// TestCreateTransactionIdempotency verifies that attempting to create a second
-// transaction with the same ID returns an error (idempotency enforcement).
-func TestCreateTransactionIdempotency(t *testing.T) {
-	ctx, _ := newMockContext(t, "TestIdempotency")
+func TestCreateRecordIdempotency(t *testing.T) {
+	ctx, _ := newMockContext(t, "TestCreateRecordIdempotency")
 	cc := &TransactionChaincode{}
+	input := sampleTransactionInput()
 
-	txID, tenantID, fromAcc, toAcc, amount, currency, txType, status := sampleTransaction()
-
-	if _, err := cc.CreateTransaction(ctx, txID, tenantID, fromAcc, toAcc, amount, currency, txType, status); err != nil {
-		t.Fatalf("first CreateTransaction failed unexpectedly: %v", err)
+	if _, err := cc.CreateRecord(ctx, marshalTransactionInput(t, input)); err != nil {
+		t.Fatalf("first CreateRecord failed unexpectedly: %v", err)
 	}
-
-	_, err := cc.CreateTransaction(ctx, txID, tenantID, fromAcc, toAcc, amount, currency, txType, status)
-	if err == nil {
-		t.Fatal("second CreateTransaction with same ID should have returned an error but did not")
+	if _, err := cc.CreateRecord(ctx, marshalTransactionInput(t, input)); err == nil {
+		t.Fatal("second CreateRecord with same transactionId should fail")
 	}
 }
 
-// TestGetTransaction verifies that GetTransaction retrieves the record that was
-// previously committed to the ledger by CreateTransaction.
-func TestGetTransaction(t *testing.T) {
-	ctx, _ := newMockContext(t, "TestGetTransaction")
+func TestQueryRecordNotFound(t *testing.T) {
+	ctx, _ := newMockContext(t, "TestQueryRecordNotFound")
 	cc := &TransactionChaincode{}
 
-	txID, tenantID, fromAcc, toAcc, amount, currency, txType, status := sampleTransaction()
+	if _, err := cc.QueryRecord(ctx, "missing-tx"); err == nil {
+		t.Fatal("QueryRecord should fail for a missing transaction")
+	}
+}
 
-	created, err := cc.CreateTransaction(ctx, txID, tenantID, fromAcc, toAcc, amount, currency, txType, status)
+func TestVerifyIntegrity(t *testing.T) {
+	ctx, stub := newMockContext(t, "TestVerifyIntegrity")
+	cc := &TransactionChaincode{}
+	input := sampleTransactionInput()
+
+	record, err := cc.CreateRecord(ctx, marshalTransactionInput(t, input))
 	if err != nil {
-		t.Fatalf("CreateTransaction failed: %v", err)
+		t.Fatalf("CreateRecord failed: %v", err)
 	}
 
-	retrieved, err := cc.GetTransaction(ctx, txID)
+	verification, err := cc.VerifyIntegrity(ctx, input.TransactionID)
 	if err != nil {
-		t.Fatalf("GetTransaction returned unexpected error: %v", err)
+		t.Fatalf("VerifyIntegrity failed: %v", err)
+	}
+	if !verification.Valid {
+		t.Fatal("expected untampered transaction to validate successfully")
 	}
 
-	if retrieved.TransactionID != created.TransactionID {
-		t.Errorf("TransactionID mismatch: got %q, want %q", retrieved.TransactionID, created.TransactionID)
-	}
-	if retrieved.Hash != created.Hash {
-		t.Errorf("Hash mismatch: got %q, want %q", retrieved.Hash, created.Hash)
-	}
-	if retrieved.Amount != amount {
-		t.Errorf("Amount mismatch: got %q, want %q", retrieved.Amount, amount)
-	}
-}
-
-// TestGetTransactionNotFound verifies that GetTransaction returns a descriptive
-// error when the requested transaction ID does not exist on the ledger.
-func TestGetTransactionNotFound(t *testing.T) {
-	ctx, _ := newMockContext(t, "TestGetTransactionNotFound")
-	cc := &TransactionChaincode{}
-
-	_, err := cc.GetTransaction(ctx, "NON-EXISTENT-TX-99999")
-	if err == nil {
-		t.Fatal("GetTransaction for a missing key should return an error but returned nil")
-	}
-}
-
-// TestUpdateTransactionStatus verifies that UpdateTransactionStatus correctly
-// mutates the status and fraud fields while preserving immutable core fields.
-func TestUpdateTransactionStatus(t *testing.T) {
-	ctx, stub := newMockContext(t, "TestUpdateTransactionStatus")
-	cc := &TransactionChaincode{}
-
-	txID, tenantID, fromAcc, toAcc, amount, currency, txType, _ := sampleTransaction()
-
-	if _, err := cc.CreateTransaction(ctx, txID, tenantID, fromAcc, toAcc, amount, currency, txType, "PENDING"); err != nil {
-		t.Fatalf("CreateTransaction failed: %v", err)
-	}
-
-	// Start a new mock transaction to simulate a separate block for the update.
-	stub.MockTransactionEnd(fmt.Sprintf("txid-%s", "TestUpdateTransactionStatus"))
-	stub.MockTransactionStart("txid-TestUpdateTransactionStatus-update")
-	stub.TxTimestamp = timestamppb.Now()
-
-	updated, err := cc.UpdateTransactionStatus(ctx, txID, "COMPLETED", "0.15", "LOW")
-	if err != nil {
-		t.Fatalf("UpdateTransactionStatus returned unexpected error: %v", err)
-	}
-
-	if updated.Status != "COMPLETED" {
-		t.Errorf("Status: got %q, want %q", updated.Status, "COMPLETED")
-	}
-	if updated.FraudScore != 0.15 {
-		t.Errorf("FraudScore: got %f, want 0.15", updated.FraudScore)
-	}
-	if updated.FraudRiskLevel != "LOW" {
-		t.Errorf("FraudRiskLevel: got %q, want %q", updated.FraudRiskLevel, "LOW")
-	}
-	// Core immutable fields must be preserved.
-	if updated.Amount != amount {
-		t.Errorf("Amount must not change: got %q, want %q", updated.Amount, amount)
-	}
-	if updated.FromAccount != fromAcc {
-		t.Errorf("FromAccount must not change: got %q, want %q", updated.FromAccount, fromAcc)
-	}
-	// Hash must still be consistent with the immutable fields.
-	expectedHash := computeHash(txID, tenantID, fromAcc, toAcc, amount, currency)
-	if updated.Hash != expectedHash {
-		t.Errorf("Hash after update does not match expected value.\n  got:  %q\n  want: %q", updated.Hash, expectedHash)
-	}
-}
-
-// TestUpdateTransactionStatusInvalidFraudScore verifies that a non-numeric fraud
-// score string causes UpdateTransactionStatus to return an error.
-func TestUpdateTransactionStatusInvalidFraudScore(t *testing.T) {
-	ctx, _ := newMockContext(t, "TestInvalidFraudScore")
-	cc := &TransactionChaincode{}
-
-	txID, tenantID, fromAcc, toAcc, amount, currency, txType, status := sampleTransaction()
-	if _, err := cc.CreateTransaction(ctx, txID, tenantID, fromAcc, toAcc, amount, currency, txType, status); err != nil {
-		t.Fatalf("CreateTransaction failed: %v", err)
-	}
-
-	_, err := cc.UpdateTransactionStatus(ctx, txID, "COMPLETED", "not-a-number", "HIGH")
-	if err == nil {
-		t.Fatal("UpdateTransactionStatus with invalid fraud score should return an error")
-	}
-}
-
-// TestVerifyTransactionIntegrity verifies that:
-//  1. A freshly created transaction passes the integrity check (hash matches).
-//  2. A transaction whose Amount field has been directly tampered in the state
-//     database (while the hash remains unchanged) fails the integrity check.
-func TestVerifyTransactionIntegrity(t *testing.T) {
-	ctx, stub := newMockContext(t, "TestVerifyTransactionIntegrity")
-	cc := &TransactionChaincode{}
-
-	txID, tenantID, fromAcc, toAcc, amount, currency, txType, status := sampleTransaction()
-
-	record, err := cc.CreateTransaction(ctx, txID, tenantID, fromAcc, toAcc, amount, currency, txType, status)
-	if err != nil {
-		t.Fatalf("CreateTransaction failed: %v", err)
-	}
-
-	// Step 1 — untampered record must pass integrity check.
-	valid, err := cc.VerifyTransactionIntegrity(ctx, txID)
-	if err != nil {
-		t.Fatalf("VerifyTransactionIntegrity failed: %v", err)
-	}
-	if !valid {
-		t.Fatal("integrity check should pass for an untampered record but returned false")
-	}
-
-	// Step 2 — simulate a direct state-database tamper:
-	// change the Amount without updating the stored hash.
-	record.Amount = "99999999.00" // tampered amount
-	// record.Hash intentionally left as the original value
-
-	tamperedJSON, err := json.Marshal(record)
+	record.Amount = "999999.00"
+	tampered, err := json.Marshal(record)
 	if err != nil {
 		t.Fatalf("failed to marshal tampered record: %v", err)
 	}
-	stub.State[txID] = tamperedJSON // bypass chaincode and write directly to state
+	stub.State[input.TransactionID] = tampered
 
-	// Step 3 — tampered record must fail integrity check.
-	valid, err = cc.VerifyTransactionIntegrity(ctx, txID)
+	verification, err = cc.VerifyIntegrity(ctx, input.TransactionID)
 	if err != nil {
-		t.Fatalf("VerifyTransactionIntegrity failed after tamper: %v", err)
+		t.Fatalf("VerifyIntegrity after tamper failed: %v", err)
 	}
-	if valid {
-		t.Fatal("integrity check should fail for a tampered record but returned true")
+	if verification.Valid {
+		t.Fatal("expected tampered transaction to fail verification")
+	}
+}
+
+func TestCreateTransactionLegacyWrapper(t *testing.T) {
+	ctx, _ := newMockContext(t, "TestCreateTransactionLegacyWrapper")
+	cc := &TransactionChaincode{}
+
+	record, err := cc.CreateTransaction(ctx, "TX-LEGACY", "TENANT-A", "1234567890", "9876543210", "100.00", "USD", "TRANSFER", "SUBMITTED")
+	if err != nil {
+		t.Fatalf("CreateTransaction legacy wrapper failed: %v", err)
+	}
+
+	if record.FromAccountMasked != "******7890" {
+		t.Fatalf("legacy wrapper did not mask source account: %q", record.FromAccountMasked)
+	}
+	if record.Decision != "UNKNOWN" {
+		t.Fatalf("legacy wrapper should default decision to UNKNOWN, got %q", record.Decision)
 	}
 }

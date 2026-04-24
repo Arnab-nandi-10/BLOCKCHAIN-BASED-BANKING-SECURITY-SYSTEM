@@ -35,7 +35,7 @@ public interface BlockchainServiceClient {
      * @return ledger coordinates (transaction ID and block number) on success
      */
     @PostMapping("/api/v1/blockchain/audit")
-    BlockchainAuditResponse submitAudit(@RequestBody BlockchainAuditRequest request);
+    ApiResponse<BlockchainAuditResponse> submitAudit(@RequestBody BlockchainAuditRequest request);
 
     /**
      * Retrieves the current ledger status of a previously submitted transaction.
@@ -46,7 +46,17 @@ public interface BlockchainServiceClient {
      * @return current transaction status and block information
      */
     @GetMapping("/api/v1/blockchain/transactions/{txId}")
-    BlockchainTransactionResponse getTransaction(@PathVariable("txId") String txId);
+    ApiResponse<BlockchainTransactionResponse> getTransaction(@PathVariable("txId") String txId);
+
+    /**
+     * Recomputes the hashes for an anchored audit record and returns the latest
+     * verification result.
+     *
+     * @param auditId audit business identifier
+     * @return verification result
+     */
+    @GetMapping("/api/v1/blockchain/audit/{auditId}/verify")
+    ApiResponse<BlockchainVerificationResponse> verifyAudit(@PathVariable("auditId") String auditId);
 
     // ── Nested request / response records ─────────────────────────────────────
 
@@ -85,6 +95,7 @@ public interface BlockchainServiceClient {
             String  auditId,
             String  blockchainTxId,
             String  blockNumber,
+            String  verificationStatus,
             boolean success
     ) {}
 
@@ -101,7 +112,30 @@ public interface BlockchainServiceClient {
             String        transactionId,
             String        blockchainTxId,
             String        blockNumber,
+            String        ledgerStatus,
+            String        verificationStatus,
+            String        payloadHash,
+            String        recordHash,
+            String        previousHash,
             String        status,
             LocalDateTime timestamp
+    ) {}
+
+    record BlockchainVerificationResponse(
+            String recordId,
+            String verificationStatus,
+            boolean valid,
+            String payloadHash,
+            String recomputedPayloadHash,
+            String recordHash,
+            String recomputedRecordHash,
+            String previousHash,
+            String verifiedAt
+    ) {}
+
+    record ApiResponse<T>(
+            boolean success,
+            String message,
+            T data
     ) {}
 }

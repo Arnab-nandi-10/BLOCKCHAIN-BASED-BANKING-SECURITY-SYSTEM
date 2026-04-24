@@ -9,10 +9,12 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Kafka domain event published whenever the state of a financial transaction
- * changes within the BBSS platform.
+ * changes within the Civic Savings platform.
  *
  * <p>Producers: {@code transaction-service}, {@code blockchain-service}
  * <br>Consumers: {@code audit-service}, {@code fraud-detection-service},
@@ -74,6 +76,11 @@ public class TransactionEvent implements Serializable {
     private String currency;
 
     /**
+     * Transaction type (TRANSFER, PAYMENT, WITHDRAWAL, DEPOSIT).
+     */
+    private String transactionType;
+
+    /**
      * Current lifecycle status of the transaction.
      * Consumers should treat transitions as a state machine:
      * SUBMITTED → VERIFIED → COMPLETED
@@ -82,10 +89,58 @@ public class TransactionEvent implements Serializable {
      */
     private String status;
 
+    /** Independent ledger anchoring state: NOT_REQUESTED, PENDING_LEDGER, COMMITTED, FAILED_LEDGER. */
+    private String ledgerStatus;
+
+    /** Latest integrity verification state for the ledger record. */
+    private String verificationStatus;
+
+    /** Fraud score captured before the blockchain write. */
+    private Double fraudScore;
+
+    /** Fraud risk level captured before the blockchain write. */
+    private String riskLevel;
+
+    /** Final business decision captured before the blockchain write (ALLOW / HOLD / BLOCK). */
+    private String decision;
+
+    /** Recommendation returned by the fraud engine or manual review flow. */
+    private String recommendation;
+
+    /** Whether the transaction requires manual review. */
+    private Boolean reviewRequired;
+
+    /** Rule identifiers that contributed to the fraud outcome. */
+    private List<String> triggeredRules;
+
+    /** Human-readable explanations from the fraud engine. */
+    private List<String> explanations;
+
+    /** Hyperledger Fabric transaction identifier when known. */
+    private String blockchainTxId;
+
+    /** Fabric block number when known. */
+    private String blockNumber;
+
     // ── Metadata ──────────────────────────────────────────────────────────────
 
     /** Server-side instant at which this event was created. */
     private LocalDateTime timestamp;
+
+    /**
+     * Original transaction submission timestamp.
+     */
+    private LocalDateTime transactionTimestamp;
+
+    /**
+     * Originating IP address when available.
+     */
+    private String ipAddress;
+
+    /**
+     * Optional metadata for downstream analytics.
+     */
+    private Map<String, String> metadata;
 
     /**
      * Optional correlation identifier propagated from the originating HTTP
@@ -97,7 +152,7 @@ public class TransactionEvent implements Serializable {
     // ── Status enum ───────────────────────────────────────────────────────────
 
     /**
-     * Lifecycle states of a BBSS transaction.
+    * Lifecycle states of a Civic Savings transaction.
      *
      * <ul>
      *   <li>{@link #SUBMITTED}   – transaction has been received and persisted</li>

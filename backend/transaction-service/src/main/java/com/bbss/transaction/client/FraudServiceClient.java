@@ -50,6 +50,7 @@ public interface FraudServiceClient {
             BigDecimal amount,
             String currency,
             String transactionType,
+            String transactionTimestamp,
             String ipAddress,
             Map<String, String> metadata
     ) {}
@@ -67,9 +68,18 @@ public interface FraudServiceClient {
     record FraudScoreResponse(
             String transactionId,
             double score,
+            double mlScore,
+            double ruleScore,
+            double behavioralScore,
             String riskLevel,
+            String decision,
             List<String> triggeredRules,
+            List<String> explanations,
             String recommendation,
-            boolean shouldBlock
+            boolean reviewRequired,
+            boolean shouldBlock,
+            boolean fallbackUsed,
+            String modelVersion,
+            double processingTimeMs
     ) {}
 }

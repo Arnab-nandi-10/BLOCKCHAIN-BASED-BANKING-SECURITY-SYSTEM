@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "Enterprise-grade system health monitoring for BBSS platform - Service uptime, circuit breakers, JVM metrics, database pools, Kafka consumers",
+  "description": "Enterprise-grade system health monitoring for Civic Savings platform - Service uptime, circuit breakers, JVM metrics, database pools, Kafka consumers",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -853,7 +853,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "BBSS - System Health Dashboard",
+  "title": "Civic Savings - System Health Dashboard",
   "uid": "bbss-system-health",
   "version": 1,
   "weekStart": ""

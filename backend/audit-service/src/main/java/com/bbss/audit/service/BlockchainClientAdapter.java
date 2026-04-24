@@ -54,7 +54,9 @@ public class BlockchainClientAdapter {
             BlockchainServiceClient.BlockchainAuditRequest request) {
         
         log.debug("Calling blockchain-service.submitAudit for auditId={}", request.auditId());
-        return blockchainServiceClient.submitAudit(request);
+        BlockchainServiceClient.ApiResponse<BlockchainServiceClient.BlockchainAuditResponse> response =
+                blockchainServiceClient.submitAudit(request);
+        return response != null ? response.data() : null;
     }
 
     /**
@@ -85,7 +87,18 @@ public class BlockchainClientAdapter {
     @Bulkhead(name = "blockchainClient")
     public BlockchainServiceClient.BlockchainTransactionResponse getTransaction(String txId) {
         log.debug("Calling blockchain-service.getTransaction for txId={}", txId);
-        return blockchainServiceClient.getTransaction(txId);
+        BlockchainServiceClient.ApiResponse<BlockchainServiceClient.BlockchainTransactionResponse> response =
+                blockchainServiceClient.getTransaction(txId);
+        return response != null ? response.data() : null;
+    }
+
+    @CircuitBreaker(name = "blockchainClient", fallbackMethod = "verifyAuditFallback")
+    @Bulkhead(name = "blockchainClient")
+    public BlockchainServiceClient.BlockchainVerificationResponse verifyAudit(String auditId) {
+        log.debug("Calling blockchain-service.verifyAudit for auditId={}", auditId);
+        BlockchainServiceClient.ApiResponse<BlockchainServiceClient.BlockchainVerificationResponse> response =
+                blockchainServiceClient.verifyAudit(auditId);
+        return response != null ? response.data() : null;
     }
 
     /**
@@ -102,6 +115,15 @@ public class BlockchainClientAdapter {
                 txId, throwable.getMessage());
         
         // Return null to signal data unavailable
+        return null;
+    }
+
+    private BlockchainServiceClient.BlockchainVerificationResponse verifyAuditFallback(
+            String auditId, Throwable throwable) {
+
+        log.warn("Circuit breaker OPEN or bulkhead FULL for verifyAudit: auditId={} reason={}",
+                auditId, throwable.getMessage());
+
         return null;
     }
 }

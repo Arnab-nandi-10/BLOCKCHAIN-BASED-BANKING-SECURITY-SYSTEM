@@ -1,26 +1,39 @@
 package com.bbss.transaction.service;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.TextStyle;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.bbss.transaction.client.BlockchainServiceClient;
-import com.bbss.transaction.client.BlockchainServiceClient.BlockchainSubmitRequest;
-import com.bbss.transaction.client.BlockchainServiceClient.BlockchainSubmitResponse;
 import com.bbss.transaction.client.FraudServiceClient;
 import com.bbss.transaction.client.FraudServiceClient.FraudScoreRequest;
 import com.bbss.transaction.client.FraudServiceClient.FraudScoreResponse;
+import com.bbss.transaction.client.TenantServiceClient;
 import com.bbss.transaction.config.MetricsConfig;
+import com.bbss.transaction.domain.model.LedgerStatus;
 import com.bbss.transaction.domain.model.Transaction;
 import com.bbss.transaction.domain.model.TransactionStatus;
+import com.bbss.transaction.domain.model.TransactionType;
+import com.bbss.transaction.domain.model.VerificationStatus;
 import com.bbss.transaction.domain.repository.TransactionRepository;
 import com.bbss.transaction.dto.SubmitTransactionRequest;
+import com.bbss.transaction.dto.TransactionQueryFilters;
 import com.bbss.transaction.dto.TransactionResponse;
 import com.bbss.transaction.dto.TransactionStatsResponse;
 import com.bbss.transaction.messaging.TransactionEventPublisher;
@@ -36,9 +49,9 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>Persist the transaction.</li>
  *   <li>Publish a Kafka submission event.</li>
  *   <li>Call the fraud-detection service (with circuit breaker).</li>
- *   <li>Block or hold the transaction based on the fraud score.</li>
- *   <li>Submit to the Hyperledger Fabric blockchain (with circuit breaker).</li>
- *   <li>Publish verification / block / fraud-alert Kafka events.</li>
+ *   <li>Persist the post-fraud decision locally.</li>
+ *   <li>Queue an asynchronous Fabric anchoring request via Kafka.</li>
+ *   <li>Update ledger coordinates later when blockchain-service publishes block.committed.</li>
  * </ol>
  */
 @Service
@@ -46,9 +59,22 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class TransactionService {
 
+    private static final List<String> TENANT_FRAUD_CONFIG_KEYS = List.of(
+            "fraud.threshold.block",
+            "fraud.threshold.hold",
+            "fraud.maxTransactionAmount",
+            "fraud.unusualHourStart",
+            "fraud.unusualHourEnd",
+            "fraud.highRiskCurrencies",
+            "fraud.highRiskCountries",
+            "blockchain.mode",
+            "blockchain.requireRealFabric",
+            "blockchain.fallbackAllowed"
+    );
+
     private final TransactionRepository transactionRepository;
     private final FraudServiceClient fraudServiceClient;
-    private final BlockchainServiceClient blockchainServiceClient;
+    private final TenantServiceClient tenantServiceClient;
     private final TransactionEventPublisher eventPublisher;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     private final MetricsConfig metricsConfig;
@@ -66,10 +92,12 @@ public class TransactionService {
      * @return transaction response with the current state
      */
     @Transactional
+    @SuppressWarnings("null")
     public TransactionResponse submitTransaction(
             SubmitTransactionRequest req,
             String tenantId,
-            String ipAddress) {
+            String ipAddress,
+            String requestId) {
 
         // Start end-to-end processing timer
         final long startTime = System.nanoTime();
@@ -86,7 +114,9 @@ public class TransactionService {
                 .currency(req.currency())
                 .type(req.type())
                 .status(TransactionStatus.SUBMITTED)
-                .correlationId(UUID.randomUUID().toString())
+                .ledgerStatus(LedgerStatus.NOT_REQUESTED)
+                .verificationStatus(VerificationStatus.NOT_VERIFIED)
+                .correlationId(resolveCorrelationId(requestId))
                 .ipAddress(ipAddress)
                 .metadata(req.metadata() != null ? req.metadata() : new HashMap<>())
                 .build();
@@ -118,17 +148,22 @@ public class TransactionService {
 
         tx.setFraudScore(fraudResult.score());
         tx.setFraudRiskLevel(fraudResult.riskLevel());
+        tx.setFraudDecision(fraudResult.decision());
+        tx.setFraudRecommendation(fraudResult.recommendation());
+        tx.setReviewRequired(fraudResult.reviewRequired());
+        tx.setTriggeredRules(new ArrayList<>(fraudResult.triggeredRules()));
+        tx.setExplanations(new ArrayList<>(fraudResult.explanations()));
 
         // Record fraud score metrics
         metricsConfig.getFraudScoreDistribution().record(fraudResult.score());
         metricsConfig.recordFraudScore(fraudResult.score(), fraudResult.riskLevel());
 
-        // 4a. Score >= 0.8 or explicit block directive — BLOCKED.
-        if (fraudResult.score() >= 0.8 || fraudResult.shouldBlock()) {
+        // 4a. Explicit block directive from the hybrid fraud engine.
+        if ("BLOCK".equalsIgnoreCase(fraudResult.decision()) || fraudResult.shouldBlock()) {
             tx.setStatus(TransactionStatus.BLOCKED);
             tx.setRejectionReason(
                     "Blocked by fraud engine: " + fraudResult.recommendation());
-            tx = transactionRepository.save(tx);
+            tx = queueLedgerCommitRequest(tx);
             eventPublisher.publishTransactionBlocked(tx);
             
             // Record blocked transaction metrics
@@ -147,10 +182,11 @@ public class TransactionService {
             return mapToResponse(tx);
         }
 
-        // 4b. Score >= 0.75 — FRAUD_HOLD for manual review.
-        if (fraudResult.score() >= 0.75) {
+        // 4b. High risk or degraded-mode review requirement — FRAUD_HOLD for manual review.
+        if ("HOLD".equalsIgnoreCase(fraudResult.decision()) || fraudResult.reviewRequired()) {
             tx.setStatus(TransactionStatus.FRAUD_HOLD);
-            tx = transactionRepository.save(tx);
+            tx.setRejectionReason("Held for fraud review: " + fraudResult.recommendation());
+            tx = queueLedgerCommitRequest(tx);
             eventPublisher.publishFraudAlert(tx, fraudResult);
             
             // Record fraud hold metrics
@@ -166,8 +202,10 @@ public class TransactionService {
             return mapToResponse(tx);
         }
 
-        // 5 – 9. Submit to blockchain.
-        TransactionResponse response = processBlockchainSubmission(tx);
+        tx.setStatus(TransactionStatus.VERIFIED);
+        tx.setRejectionReason(null);
+        tx = queueLedgerCommitRequest(tx);
+        TransactionResponse response = mapToResponse(tx);
         
         // Record total processing time
         metricsConfig.getTransactionProcessingTimer().record(System.nanoTime() - startTime,
@@ -201,9 +239,12 @@ public class TransactionService {
      * @return page of transaction responses
      */
     @Transactional(readOnly = true)
-    public Page<TransactionResponse> listTransactions(String tenantId, Pageable pageable) {
+    public Page<TransactionResponse> listTransactions(
+            String tenantId,
+            TransactionQueryFilters filters,
+            Pageable pageable) {
         return transactionRepository
-                .findByTenantIdOrderByCreatedAtDesc(tenantId, pageable)
+            .findAll(buildSpecification(tenantId, filters), java.util.Objects.requireNonNull(pageable, "pageable must not be null"))
                 .map(this::mapToResponse);
     }
 
@@ -218,9 +259,11 @@ public class TransactionService {
     @Transactional(readOnly = true)
     public Page<TransactionResponse> listByStatus(
             String tenantId, TransactionStatus status, Pageable pageable) {
-        return transactionRepository
-                .findByTenantIdAndStatus(tenantId, status, pageable)
-                .map(this::mapToResponse);
+        return listTransactions(
+                tenantId,
+                new TransactionQueryFilters(null, status, null, null, null, null, null),
+                pageable
+        );
     }
 
     /**
@@ -230,33 +273,56 @@ public class TransactionService {
      * @return statistics response
      */
     @Transactional(readOnly = true)
-    public TransactionStatsResponse getTransactionStats(String tenantId) {
-        LocalDateTime to = LocalDateTime.now();
-        LocalDateTime from = to.minusHours(24);
+    public TransactionStatsResponse getTransactionStats(
+            String tenantId,
+            LocalDateTime from,
+            LocalDateTime to) {
+        LocalDateTime windowTo = to != null ? to : LocalDateTime.now();
+        LocalDateTime windowFrom = from != null ? from : windowTo.minusDays(6).toLocalDate().atStartOfDay();
 
-        long totalSubmitted = transactionRepository
-                .countByTenantIdAndStatusAndCreatedAtBetween(tenantId, TransactionStatus.SUBMITTED, from, to);
-        long totalVerified = transactionRepository
-                .countByTenantIdAndStatusAndCreatedAtBetween(tenantId, TransactionStatus.VERIFIED, from, to);
-        long totalBlocked = transactionRepository
-                .countByTenantIdAndStatusAndCreatedAtBetween(tenantId, TransactionStatus.BLOCKED, from, to);
-        long totalFraudHold = transactionRepository
-                .countByTenantIdAndStatusAndCreatedAtBetween(tenantId, TransactionStatus.FRAUD_HOLD, from, to);
-        long totalCompleted = transactionRepository
-                .countByTenantIdAndStatusAndCreatedAtBetween(tenantId, TransactionStatus.COMPLETED, from, to);
-        long totalFailed = transactionRepository
-                .countByTenantIdAndStatusAndCreatedAtBetween(tenantId, TransactionStatus.FAILED, from, to);
+        List<Transaction> allTransactions = transactionRepository.findAll(byTenant(tenantId));
+        List<Transaction> windowTransactions = allTransactions.stream()
+                .filter(tx -> tx.getCreatedAt() != null)
+                .filter(tx -> !tx.getCreatedAt().isBefore(windowFrom) && !tx.getCreatedAt().isAfter(windowTo))
+                .sorted(Comparator.comparing(Transaction::getCreatedAt))
+                .toList();
+
+        Map<String, Long> statusCounts = countStatuses(
+                allTransactions,
+                Transaction::getStatus,
+                TransactionStatus.values()
+        );
+        Map<String, Long> ledgerStatusCounts = countStatuses(
+                allTransactions,
+                Transaction::getLedgerStatus,
+                LedgerStatus.values()
+        );
+        Map<String, Long> verificationStatusCounts = countStatuses(
+                allTransactions,
+                Transaction::getVerificationStatus,
+                VerificationStatus.values()
+        );
+        Map<String, Long> fraudRiskDistribution = countFraudRiskLevels(allTransactions);
 
         return TransactionStatsResponse.builder()
                 .tenantId(tenantId)
-                .totalSubmitted(totalSubmitted)
-                .totalVerified(totalVerified)
-                .totalBlocked(totalBlocked)
-                .totalFraudHold(totalFraudHold)
-                .totalCompleted(totalCompleted)
-                .totalFailed(totalFailed)
-                .from(from)
-                .to(to)
+                .totalTransactions(allTransactions.size())
+                .totalAmount(sumAmounts(allTransactions))
+                .totalSubmitted(statusCounts.getOrDefault(TransactionStatus.SUBMITTED.name(), 0L))
+                .totalVerified(statusCounts.getOrDefault(TransactionStatus.VERIFIED.name(), 0L))
+                .totalBlocked(statusCounts.getOrDefault(TransactionStatus.BLOCKED.name(), 0L))
+                .totalFraudHold(statusCounts.getOrDefault(TransactionStatus.FRAUD_HOLD.name(), 0L))
+                .totalCompleted(statusCounts.getOrDefault(TransactionStatus.COMPLETED.name(), 0L))
+                .totalFailed(statusCounts.getOrDefault(TransactionStatus.FAILED.name(), 0L))
+                .statusCounts(statusCounts)
+                .ledgerStatusCounts(ledgerStatusCounts)
+                .verificationStatusCounts(verificationStatusCounts)
+                .fraudRiskDistribution(fraudRiskDistribution)
+                .dailyVolume(buildDailyVolume(windowFrom, windowTo, windowTransactions))
+                .windowTransactions(windowTransactions.size())
+                .windowAmount(sumAmounts(windowTransactions))
+                .from(windowFrom)
+                .to(windowTo)
                 .build();
     }
 
@@ -280,8 +346,9 @@ public class TransactionService {
                         tx.getAmount(),
                         tx.getCurrency(),
                         tx.getType().name(),
+                        tx.getCreatedAt() != null ? tx.getCreatedAt().toString() : null,
                         tx.getIpAddress(),
-                        tx.getMetadata()
+                        resolveFraudMetadata(tx)
                 );
                 return fraudServiceClient.scoreFraud(req);
             });
@@ -292,110 +359,144 @@ public class TransactionService {
 
     /**
      * Fallback invoked when the fraud-service circuit breaker is open or times out.
-     * Logs a warning and returns a neutral score that allows processing to continue
-     * with PENDING status, flagging the transaction for later manual review.
+     * Logs a warning and returns a neutral score that routes the transaction
+     * to manual review.
      */
     private FraudScoreResponse fraudServiceFallback(Transaction tx, Throwable cause) {
-        log.warn("Fraud service unavailable for transaction {} — continuing with PENDING status. Cause: {}",
+        log.warn("Fraud service unavailable for transaction {} — routing to manual review. Cause: {}",
                 tx.getTransactionId(), cause.getMessage());
         return new FraudScoreResponse(
                 tx.getTransactionId(),
-                -1.0,
-                "UNKNOWN",
+                0.50,
+                0.50,
+                0.0,
+                0.0,
+                "MEDIUM",
+                "HOLD",
                 List.of("FRAUD_SERVICE_UNAVAILABLE"),
-                "Fraud service unavailable — pending manual review",
-                false
+                List.of("Fraud scoring service was unavailable, so a neutral score was assigned and the transaction was sent to manual review."),
+                "MANUAL_REVIEW",
+                true,
+                false,
+                true,
+                "unavailable",
+                0.0
         );
     }
 
     /**
-     * Submits the transaction to the blockchain wrapped in the "blockchain-service"
-     * circuit breaker. Falls back to {@link #blockchainFallback} on failure.
+     * Marks the transaction as pending Fabric anchoring and publishes a Kafka
+     * request for blockchain-service to handle asynchronously.
      */
     @Transactional
-    public TransactionResponse processBlockchainSubmission(Transaction tx) {
-        final long blockchainStart = System.nanoTime();
-        CircuitBreaker cb = circuitBreakerRegistry.circuitBreaker("blockchain-service");
-        BlockchainSubmitResponse blockchainResult;
-        try {
-            blockchainResult = cb.executeSupplier(() -> {
-                BlockchainSubmitRequest req = new BlockchainSubmitRequest(
-                        tx.getTransactionId(),
-                        tx.getTenantId(),
-                        tx.getFromAccount(),
-                        tx.getToAccount(),
-                        tx.getAmount(),
-                        tx.getCurrency(),
-                        tx.getType().name(),
-                        tx.getStatus().name(),
-                        tx.getCreatedAt()
-                );
-                // Unwrap the ApiResponse envelope to get the inner data
-                BlockchainServiceClient.ApiResponse<BlockchainSubmitResponse> apiResp =
-                        blockchainServiceClient.submitTransaction(req);
-                return (apiResp != null && apiResp.data() != null)
-                        ? apiResp.data()
-                        : new BlockchainSubmitResponse(req.transactionId(), null, null, false, "Empty response from blockchain service");
-            });
-        } catch (Exception ex) {
-            blockchainResult = blockchainFallback(tx, ex);
-        }
-        
-        metricsConfig.getBlockchainSubmissionTimer().record(System.nanoTime() - blockchainStart,
-                java.util.concurrent.TimeUnit.NANOSECONDS);
+    public Transaction queueLedgerCommitRequest(Transaction tx) {
+        tx.setLedgerStatus(LedgerStatus.PENDING_LEDGER);
+        tx.setVerificationStatus(VerificationStatus.NOT_VERIFIED);
+        Transaction saved = transactionRepository.save(tx);
 
-        // 7. Update transaction with blockchain details and VERIFIED status.
-        if (blockchainResult.success()) {
-            tx.setBlockchainTxId(blockchainResult.blockchainTxId());
-            tx.setBlockNumber(blockchainResult.blockNumber());
-            tx.setStatus(TransactionStatus.VERIFIED);
-            Transaction saved = transactionRepository.save(tx);
+        metricsConfig.recordBlockchainSubmission("queued", saved.getTenantId());
+        eventPublisher.publishLedgerCommitRequested(saved);
 
-            // Record blockchain success metrics
-            metricsConfig.getBlockchainSubmissionCounter().increment();
-            metricsConfig.recordBlockchainSubmission("success", tx.getTenantId());
-            metricsConfig.getBlockchainVerificationCounter().increment();
-            metricsConfig.recordTransactionCreated("VERIFIED", tx.getTenantId());
-            metricsConfig.recordAmountProcessed(tx.getAmount().doubleValue(), tx.getCurrency(), "VERIFIED");
-
-            // 8. Publish verified event.
-            eventPublisher.publishTransactionVerified(saved);
-            log.info("Transaction {} VERIFIED on blockchain. TxHash={}, Block={}",
-                    saved.getTransactionId(), saved.getBlockchainTxId(), saved.getBlockNumber());
-            return mapToResponse(saved);
-        } else {
-            tx.setStatus(TransactionStatus.FAILED);
-            tx.setRejectionReason("Blockchain submission failed: " + blockchainResult.message());
-            Transaction saved = transactionRepository.save(tx);
-            
-            // Record blockchain failure metrics
-            String failureReason = blockchainResult.message() != null && 
-                                   blockchainResult.message().contains("circuit") ? "circuit_open" : "failure";
-            metricsConfig.recordBlockchainSubmission(failureReason, tx.getTenantId());
-            metricsConfig.recordTransactionCreated("FAILED", tx.getTenantId());
-            
-            log.error("Transaction {} FAILED blockchain submission: {}",
-                    saved.getTransactionId(), blockchainResult.message());
-            return mapToResponse(saved);
-        }
+        log.info("Transaction {} queued for asynchronous blockchain anchoring with status={}",
+                saved.getTransactionId(), saved.getStatus());
+        return saved;
     }
 
     /**
-     * Fallback invoked when the blockchain-service circuit breaker is open or times out.
-     * Sets the transaction to PENDING and schedules a retry via Kafka republication.
+     * Called by the block.committed consumer once blockchain-service has a real
+     * Fabric tx ID and block number.
      */
-    private BlockchainSubmitResponse blockchainFallback(Transaction tx, Throwable cause) {
-        log.error("Blockchain service unavailable for transaction {} — scheduling retry via Kafka. Cause: {}",
-                tx.getTransactionId(), cause.getMessage());
-        // Re-publish the submission event so a downstream consumer can retry.
-        eventPublisher.publishTransactionSubmitted(tx);
-        return new BlockchainSubmitResponse(
-                tx.getTransactionId(),
-                null,
-                null,
-                false,
-                "Blockchain service unavailable — retry scheduled"
-        );
+    @Transactional
+    public void markLedgerCommitted(
+            String transactionId,
+            String blockchainTxId,
+            String blockNumber,
+            String verificationStatus,
+            String payloadHash,
+            String recordHash,
+            String previousHash) {
+
+        transactionRepository.findByTransactionId(transactionId).ifPresentOrElse(tx -> {
+            tx.setBlockchainTxId(blockchainTxId);
+            tx.setBlockNumber(blockNumber);
+            tx.setLedgerStatus(LedgerStatus.COMMITTED);
+            tx.setVerificationStatus(parseVerificationStatus(verificationStatus));
+            tx.setPayloadHash(payloadHash);
+            tx.setRecordHash(recordHash);
+            tx.setPreviousHash(previousHash);
+
+            Transaction saved = transactionRepository.save(tx);
+
+            metricsConfig.getBlockchainSubmissionCounter().increment();
+            metricsConfig.getBlockchainVerificationCounter().increment();
+            metricsConfig.recordBlockchainSubmission("success", saved.getTenantId());
+
+            if (saved.getStatus() == TransactionStatus.VERIFIED) {
+                eventPublisher.publishTransactionVerified(saved);
+                metricsConfig.recordTransactionCreated("VERIFIED", saved.getTenantId());
+                metricsConfig.recordAmountProcessed(saved.getAmount().doubleValue(), saved.getCurrency(), "VERIFIED");
+            }
+
+            log.info("Transaction {} committed to Fabric. blockchainTxId={} blockNumber={} verificationStatus={}",
+                    saved.getTransactionId(), blockchainTxId, blockNumber, saved.getVerificationStatus());
+        }, () -> log.warn("Received blockchain commit event for unknown transaction {}", transactionId));
+    }
+
+    @Transactional
+    public void markLedgerUnavailable(String transactionId, String errorMessage) {
+        transactionRepository.findByTransactionId(transactionId).ifPresent(tx -> {
+            tx.setLedgerStatus(LedgerStatus.PENDING_LEDGER);
+            tx.setVerificationStatus(VerificationStatus.UNAVAILABLE);
+            transactionRepository.save(tx);
+
+            metricsConfig.recordBlockchainSubmission("pending", tx.getTenantId());
+            log.warn("Transaction {} remains in PENDING_LEDGER: {}", transactionId, errorMessage);
+        });
+    }
+
+    @Transactional
+    public void updateVerificationStatus(
+            String transactionId,
+            String verificationStatus,
+            String payloadHash,
+            String recordHash,
+            String previousHash) {
+        transactionRepository.findByTransactionId(transactionId).ifPresent(tx -> {
+            VerificationStatus parsedStatus = parseVerificationStatus(verificationStatus);
+            if (parsedStatus == tx.getVerificationStatus()
+                    && equalsOrNull(payloadHash, tx.getPayloadHash())
+                    && equalsOrNull(recordHash, tx.getRecordHash())
+                    && equalsOrNull(previousHash, tx.getPreviousHash())) {
+                return;
+            }
+
+            tx.setVerificationStatus(parsedStatus);
+            if (payloadHash != null && !payloadHash.isBlank()) {
+                tx.setPayloadHash(payloadHash);
+            }
+            if (recordHash != null && !recordHash.isBlank()) {
+                tx.setRecordHash(recordHash);
+            }
+            if (previousHash != null && !previousHash.isBlank()) {
+                tx.setPreviousHash(previousHash);
+            }
+            transactionRepository.save(tx);
+            metricsConfig.getBlockchainVerificationCounter().increment();
+
+            log.info("Transaction {} verification status refreshed to {}",
+                    transactionId, tx.getVerificationStatus());
+        });
+    }
+
+    private VerificationStatus parseVerificationStatus(String verificationStatus) {
+        if (verificationStatus == null || verificationStatus.isBlank()) {
+            return VerificationStatus.NOT_VERIFIED;
+        }
+        try {
+            return VerificationStatus.valueOf(verificationStatus);
+        } catch (IllegalArgumentException ex) {
+            return VerificationStatus.UNAVAILABLE;
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -412,12 +513,193 @@ public class TransactionService {
                 .currency(tx.getCurrency())
                 .type(tx.getType())
                 .status(tx.getStatus())
+                .ledgerStatus(tx.getLedgerStatus())
+                .verificationStatus(tx.getVerificationStatus())
                 .blockchainTxId(tx.getBlockchainTxId())
                 .blockNumber(tx.getBlockNumber())
                 .fraudScore(tx.getFraudScore())
                 .fraudRiskLevel(tx.getFraudRiskLevel())
+                .fraudDecision(tx.getFraudDecision())
+                .fraudRecommendation(tx.getFraudRecommendation())
+                .reviewRequired(tx.isReviewRequired())
+                .triggeredRules(tx.getTriggeredRules())
+                .explanations(tx.getExplanations())
+                .payloadHash(tx.getPayloadHash())
+                .recordHash(tx.getRecordHash())
+                .previousHash(tx.getPreviousHash())
+                .correlationId(tx.getCorrelationId())
                 .createdAt(tx.getCreatedAt())
                 .completedAt(tx.getCompletedAt())
                 .build();
+    }
+
+    private Specification<Transaction> buildSpecification(String tenantId, TransactionQueryFilters filters) {
+        return byTenant(tenantId)
+                .and(hasSearch(filters != null ? filters.search() : null))
+                .and(equalsStatus(filters != null ? filters.status() : null))
+                .and(equalsType(filters != null ? filters.type() : null))
+                .and(equalsLedgerStatus(filters != null ? filters.ledgerStatus() : null))
+                .and(equalsVerificationStatus(filters != null ? filters.verificationStatus() : null))
+                .and(createdAfter(filters != null ? filters.fromDate() : null))
+                .and(createdBefore(filters != null ? filters.toDate() : null));
+    }
+
+    private Specification<Transaction> byTenant(String tenantId) {
+        return (root, query, cb) -> cb.equal(root.get("tenantId"), tenantId);
+    }
+
+    private Specification<Transaction> hasSearch(String search) {
+        if (search == null || search.isBlank()) {
+            return null;
+        }
+        String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+        return (root, query, cb) -> cb.or(
+                cb.like(cb.lower(root.get("transactionId")), pattern),
+                cb.like(cb.lower(root.get("fromAccount")), pattern),
+                cb.like(cb.lower(root.get("toAccount")), pattern),
+                cb.like(cb.lower(root.get("currency")), pattern),
+                cb.like(cb.lower(root.get("correlationId")), pattern),
+                cb.like(cb.lower(root.get("blockchainTxId")), pattern),
+                cb.like(cb.lower(root.get("fraudRiskLevel")), pattern),
+                cb.like(cb.lower(root.get("fraudDecision")), pattern)
+        );
+    }
+
+    private Specification<Transaction> equalsStatus(TransactionStatus status) {
+        return status == null ? null : (root, query, cb) -> cb.equal(root.get("status"), status);
+    }
+
+    private Specification<Transaction> equalsType(TransactionType type) {
+        return type == null ? null : (root, query, cb) -> cb.equal(root.get("type"), type);
+    }
+
+    private Specification<Transaction> equalsLedgerStatus(LedgerStatus ledgerStatus) {
+        return ledgerStatus == null ? null : (root, query, cb) -> cb.equal(root.get("ledgerStatus"), ledgerStatus);
+    }
+
+    private Specification<Transaction> equalsVerificationStatus(VerificationStatus verificationStatus) {
+        return verificationStatus == null
+                ? null
+                : (root, query, cb) -> cb.equal(root.get("verificationStatus"), verificationStatus);
+    }
+
+    private Specification<Transaction> createdAfter(LocalDateTime fromDate) {
+        return fromDate == null ? null : (root, query, cb) -> cb.greaterThanOrEqualTo(root.get("createdAt"), fromDate);
+    }
+
+    private Specification<Transaction> createdBefore(LocalDateTime toDate) {
+        return toDate == null ? null : (root, query, cb) -> cb.lessThanOrEqualTo(root.get("createdAt"), toDate);
+    }
+
+    private <E extends Enum<E>> Map<String, Long> countStatuses(
+            List<Transaction> transactions,
+            Function<Transaction, E> extractor,
+            E[] values) {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (E value : values) {
+            counts.put(value.name(), 0L);
+        }
+
+        Map<String, Long> observedCounts = transactions.stream()
+                .map(extractor)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.groupingBy(Enum::name, LinkedHashMap::new, Collectors.counting()));
+
+        observedCounts.forEach(counts::put);
+        return counts;
+    }
+
+    private Map<String, Long> countFraudRiskLevels(List<Transaction> transactions) {
+        Map<String, Long> distribution = new LinkedHashMap<>();
+        distribution.put("LOW", 0L);
+        distribution.put("MEDIUM", 0L);
+        distribution.put("HIGH", 0L);
+        distribution.put("CRITICAL", 0L);
+
+        Map<String, Long> observed = transactions.stream()
+                .map(Transaction::getFraudRiskLevel)
+                .filter(level -> level != null && !level.isBlank())
+                .map(level -> level.trim().toUpperCase(Locale.ROOT))
+                .collect(Collectors.groupingBy(Function.identity(), LinkedHashMap::new, Collectors.counting()));
+
+        observed.forEach(distribution::put);
+        return distribution;
+    }
+
+    private BigDecimal sumAmounts(List<Transaction> transactions) {
+        return transactions.stream()
+                .map(Transaction::getAmount)
+                .filter(java.util.Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private List<TransactionStatsResponse.DailyVolumePoint> buildDailyVolume(
+            LocalDateTime from,
+            LocalDateTime to,
+            List<Transaction> transactions) {
+        LocalDate startDate = from.toLocalDate();
+        LocalDate endDate = to.toLocalDate();
+        Map<LocalDate, List<Transaction>> grouped = transactions.stream()
+                .filter(tx -> tx.getCreatedAt() != null)
+                .collect(Collectors.groupingBy(
+                        tx -> tx.getCreatedAt().toLocalDate(),
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+
+        List<TransactionStatsResponse.DailyVolumePoint> points = new ArrayList<>();
+        for (LocalDate current = startDate; !current.isAfter(endDate); current = current.plusDays(1)) {
+            List<Transaction> dailyTransactions = grouped.getOrDefault(current, List.of());
+            points.add(TransactionStatsResponse.DailyVolumePoint.builder()
+                    .date(current.toString())
+                    .label(current.getDayOfWeek().getDisplayName(TextStyle.SHORT, Locale.ENGLISH))
+                    .transactionCount(dailyTransactions.size())
+                    .totalAmount(sumAmounts(dailyTransactions))
+                    .build());
+        }
+        return points;
+    }
+
+    private boolean equalsOrNull(String left, String right) {
+        if (left == null || left.isBlank()) {
+            return right == null || right.isBlank();
+        }
+        return left.equals(right);
+    }
+
+    private Map<String, String> resolveFraudMetadata(Transaction tx) {
+        Map<String, String> resolved = new HashMap<>();
+        if (tx.getMetadata() != null) {
+            resolved.putAll(tx.getMetadata());
+        }
+
+        try {
+            TenantServiceClient.ApiResponse<TenantServiceClient.TenantResponse> response =
+                    tenantServiceClient.getTenant(tx.getTenantId());
+            Map<String, String> tenantConfig = response != null && response.data() != null
+                    ? response.data().config()
+                    : Map.of();
+
+            if (tenantConfig != null) {
+                TENANT_FRAUD_CONFIG_KEYS.forEach(key -> {
+                    String value = tenantConfig.get(key);
+                    if (value != null && !value.isBlank()) {
+                        resolved.putIfAbsent(key, value);
+                    }
+                });
+            }
+        } catch (Exception ex) {
+            log.debug("Tenant config unavailable for tenant {}. Falling back to platform defaults: {}",
+                    tx.getTenantId(), ex.getMessage());
+        }
+
+        return resolved;
+    }
+
+    private String resolveCorrelationId(String requestId) {
+        if (requestId != null && !requestId.isBlank()) {
+            return requestId.trim();
+        }
+        return UUID.randomUUID().toString();
     }
 }

@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# configtx.yaml — Hyperledger Fabric channel configuration for BBSS network
+# configtx.yaml — Hyperledger Fabric channel configuration for Civic Savings network
 #
 # Used by configtxgen to produce:
 #   - The orderer genesis block  (profile: TwoOrgsOrdererGenesis)
@@ -15,7 +15,7 @@
 Organizations:
 
   # ---------------------------------------------------------------------------
-  # OrdererOrg — the solo orderer for the BBSS development network
+  # OrdererOrg — the solo orderer for the Civic Savings development network
   # ---------------------------------------------------------------------------
   - &OrdererOrg
     Name: OrdererOrg
@@ -132,7 +132,7 @@ Application: &ApplicationDefaults
     <<: *ApplicationCapabilities
 
 # ---------------------------------------------------------------------------
-# Orderer — default configuration for the BBSS solo orderer
+# Orderer — default configuration for the Civic Savings solo orderer
 # ---------------------------------------------------------------------------
 Orderer: &OrdererDefaults
 

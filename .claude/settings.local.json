@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make fabric-up *)",
+      "Bash(make test-backend *)",
+      "Bash(sudo apt *)",
+      "Bash(sudo -n apt update)",
+      "Bash(make test-fraud *)"
+    ]
+  }
+}

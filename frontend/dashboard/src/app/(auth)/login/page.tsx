@@ -121,7 +121,7 @@ export default function LoginPage() {
             <ShieldCheck size={24} className="text-white" />
           </div>
           <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>BBSS Platform</h1>
+          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Civic Savings</h1>
           <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>Blockchain Banking Security System</p>
           </div>
         </div>
@@ -202,10 +202,17 @@ export default function LoginPage() {
             <Zap size={11} />
             <span>AES-256 encryption · Blockchain audit trail</span>
           </div>
+
+          <p className="mt-5 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+            Need a new admin account?{' '}
+            <Link href="/register" className="font-medium transition-colors hover:opacity-80" style={{ color: 'var(--color-primary)' }}>
+              Register here
+            </Link>
+          </p>
         </div>
 
         <p className="mt-5 text-center text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          BBSS v1.0 — Enterprise Security Platform
+          Civic Savings v1.0 — Enterprise Security Platform
         </p>
       </div>
     </div>

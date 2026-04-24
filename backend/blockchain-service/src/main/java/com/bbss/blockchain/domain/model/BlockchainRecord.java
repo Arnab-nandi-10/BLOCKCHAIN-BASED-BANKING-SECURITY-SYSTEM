@@ -14,6 +14,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
@@ -68,7 +69,7 @@ public class BlockchainRecord {
     private String chaincodeId;
 
     /**
-     * JSON-serialised representation of the on-chain payload for audit and replay purposes.
+     * JSON-serialised chaincode input used for audit, replay and retry purposes.
      */
     @Column(name = "payload", columnDefinition = "TEXT")
     private String payload;
@@ -77,7 +78,36 @@ public class BlockchainRecord {
     @Column(name = "status", length = 32)
     private String status;
 
+    @Column(name = "ledger_status", nullable = false, length = 32)
+    private String ledgerStatus;
+
+    @Column(name = "verification_status", nullable = false, length = 32)
+    private String verificationStatus;
+
+    @Column(name = "payload_hash", length = 128)
+    private String payloadHash;
+
+    @Column(name = "record_hash", length = 128)
+    private String recordHash;
+
+    @Column(name = "previous_hash", length = 128)
+    private String previousHash;
+
+    @Column(name = "last_error", length = 1024)
+    private String lastError;
+
+    @Column(name = "retry_count", nullable = false)
+    @Builder.Default
+    private int retryCount = 0;
+
+    @Column(name = "next_retry_at")
+    private LocalDateTime nextRetryAt;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
+
+    @LastModifiedDate
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
 }

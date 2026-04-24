@@ -1,5 +1,6 @@
-FROM maven:3.9-eclipse-temurin-25-alpine AS build
+FROM maven:3.9.6-eclipse-temurin-21-alpine AS build
 WORKDIR /app
+ENV MAVEN_OPTS="-Dmaven.wagon.http.retryHandler.count=5 -Dmaven.wagon.rto=600000 -Dmaven.wagon.http.pool=false -Daether.connector.basic.threads=1"
 
 # Parent POM
 COPY pom.xml ./pom.xml
@@ -13,14 +14,13 @@ COPY blockchain-service/pom.xml  ./blockchain-service/pom.xml
 COPY audit-service/pom.xml       ./audit-service/pom.xml
 COPY api-gateway/pom.xml         ./api-gateway/pom.xml
 
-RUN mvn dependency:go-offline -pl api-gateway -am -q || true
-
 COPY shared/src      ./shared/src
 COPY api-gateway/src ./api-gateway/src
 
-RUN mvn package -pl api-gateway -am -DskipTests -q
+RUN --mount=type=cache,id=bbss-m2,target=/root/.m2 \
+    mvn package -pl api-gateway -am -DskipTests -q
 
-FROM eclipse-temurin:25-jre-alpine
+FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 COPY --from=build /app/api-gateway/target/*.jar app.jar
 EXPOSE 8080

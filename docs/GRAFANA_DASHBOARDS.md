@@ -335,13 +335,13 @@ volumes:
 
 2. **Dashboards**: `infrastructure/monitoring/grafana/provisioning/dashboards/dashboards.yml`
    - Auto-imports all JSON files from `/var/lib/grafana/dashboards`
-   - Creates "BBSS Monitoring" folder in Grafana UI
+   - Creates "Civic Savings Monitoring" folder in Grafana UI
    - Updates every 30 seconds, allows UI edits
 
 **On First Startup**:
 1. Grafana reads provisioning configs from `/etc/grafana/provisioning/`
 2. Prometheus datasource is created automatically (no manual setup)
-3. All 4 dashboard JSON files are imported into "BBSS Monitoring" folder
+3. All 4 dashboard JSON files are imported into "Civic Savings Monitoring" folder
 4. Dashboards are immediately accessible via Grafana UI
 
 **Updating Dashboards**:

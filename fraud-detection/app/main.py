@@ -6,11 +6,13 @@ from typing import Any, AsyncGenerator, Dict, Optional
 
 import structlog
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.api.routes import fraud, health
 from app.core.config import settings
+from app.db import close_db, init_db
 from app.services.scoring_service import scoring_service
 
 logger = structlog.get_logger(__name__)
@@ -42,15 +44,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     global _kafka_consumer, _consumer_thread
 
-    logger.info("BBSS Fraud Detection Service starting up", version="1.0.0")
+    logger.info("Civic Savings Fraud Detection Service starting up", version=settings.APP_VERSION)
+
+    # --- Initialise database tables -------------------------------------
+    try:
+        init_db()
+        logger.info("Fraud service database schema initialised")
+    except Exception as exc:
+        logger.error("Failed to initialise fraud service database schema", error=str(exc))
 
     # --- Load ML model ---------------------------------------------------
     try:
-        scoring_service.model.load(settings.MODEL_PATH, settings.SCALER_PATH)
+        scoring_service.model.load(
+            settings.MODEL_PATH,
+            settings.SCALER_PATH,
+            settings.MODEL_METADATA_PATH,
+        )
         logger.info(
             "ML model ready",
             model_loaded=scoring_service.model.is_loaded(),
             model_path=settings.MODEL_PATH,
+            model_version=scoring_service.model.version,
         )
     except Exception as exc:
         logger.error("ML model failed to load", error=str(exc))
@@ -76,7 +90,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield  # Application is running
 
     # --- Graceful shutdown -----------------------------------------------
-    logger.info("BBSS Fraud Detection Service shutting down")
+    logger.info("Civic Savings Fraud Detection Service shutting down")
 
     if _kafka_consumer is not None:
         _kafka_consumer.stop()
@@ -86,6 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 logger.warning("Kafka consumer thread did not stop within 10 s")
         logger.info("Kafka consumer stopped")
 
+    close_db()
     logger.info("Shutdown complete")
 
 
@@ -94,8 +109,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="BBSS Fraud Detection Service",
-    version="1.0.0",
+    title="Civic Savings Fraud Detection Service",
+    version=settings.APP_VERSION,
     description=(
         "Real-time ML-powered fraud detection microservice for the "
         "Blockchain Banking Security System."
@@ -149,6 +164,37 @@ app.include_router(health.router, prefix="/api/v1")
 # ---------------------------------------------------------------------------
 # Global exception handlers
 # ---------------------------------------------------------------------------
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    details = []
+    for error in exc.errors():
+        field_path = ".".join(str(part) for part in error.get("loc", []) if part != "body")
+        details.append(f"{field_path or 'request'}: {error.get('msg', 'invalid value')}")
+
+    message = "Invalid request payload"
+    if details:
+        message = f"Invalid request payload. {'; '.join(details)}"
+
+    logger.warning(
+        "Validation error in request handler",
+        path=str(request.url.path),
+        method=request.method,
+        errors=details,
+    )
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "message": message,
+            "errors": details,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
 
 @app.exception_handler(ValueError)

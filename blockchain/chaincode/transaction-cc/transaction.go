@@ -5,40 +5,71 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
-// TransactionChaincode implements the Hyperledger Fabric smart contract functions
-// for managing financial transactions with tamper-evident audit trails.
+const (
+	transactionDocType       = "TRANSACTION"
+	transactionSchemaVersion = "2.0.0"
+)
+
+// TransactionChaincode stores post-fraud transaction decisions in a tamper-evident form.
+// Fraud scoring still happens off-chain; the ledger only anchors the decision outcome.
 type TransactionChaincode struct {
 	contractapi.Contract
 }
 
-// TransactionRecord represents a financial transaction stored on the blockchain ledger.
-// The Amount field uses string type to avoid floating-point precision issues.
-type TransactionRecord struct {
-	TransactionID  string  `json:"transactionId"`
-	TenantID       string  `json:"tenantId"`
-	FromAccount    string  `json:"fromAccount"`
-	ToAccount      string  `json:"toAccount"`
-	Amount         string  `json:"amount"`
-	Currency       string  `json:"currency"`
-	Type           string  `json:"type"`
-	Status         string  `json:"status"`
-	FraudScore     float64 `json:"fraudScore"`
-	FraudRiskLevel string  `json:"fraudRiskLevel"`
-	CreatedAt      string  `json:"createdAt"`
-	UpdatedAt      string  `json:"updatedAt"`
-	BlockchainTxID string  `json:"blockchainTxId"`
-	Hash           string  `json:"hash"`
-	DocType        string  `json:"docType"`
+// TransactionRecordInput is the JSON payload accepted by CreateRecord.
+// The payload must already be sanitised by the caller; no plain sensitive data
+// should be written to the ledger.
+type TransactionRecordInput struct {
+	TransactionID     string `json:"transactionId"`
+	TenantID          string `json:"tenantId"`
+	FromAccountMasked string `json:"fromAccountMasked"`
+	ToAccountMasked   string `json:"toAccountMasked"`
+	Amount            string `json:"amount"`
+	Currency          string `json:"currency"`
+	TransactionType   string `json:"transactionType"`
+	Status            string `json:"status"`
+	FraudScore        string `json:"fraudScore"`
+	RiskLevel         string `json:"riskLevel"`
+	Decision          string `json:"decision"`
+	DecisionReason    string `json:"decisionReason"`
+	Explanation       string `json:"explanation"`
+	Payload           string `json:"payload"`
+	PreviousHash      string `json:"previousHash,omitempty"`
+	DecisionTimestamp string `json:"decisionTimestamp,omitempty"`
 }
 
-// HistoryRecord represents a single entry in the history of a transaction key.
+// TransactionRecord represents the immutable record persisted in Fabric.
+type TransactionRecord struct {
+	TransactionID     string `json:"transactionId"`
+	TenantID          string `json:"tenantId"`
+	FromAccountMasked string `json:"fromAccountMasked"`
+	ToAccountMasked   string `json:"toAccountMasked"`
+	Amount            string `json:"amount"`
+	Currency          string `json:"currency"`
+	TransactionType   string `json:"transactionType"`
+	Status            string `json:"status"`
+	FraudScore        string `json:"fraudScore"`
+	RiskLevel         string `json:"riskLevel"`
+	Decision          string `json:"decision"`
+	DecisionReason    string `json:"decisionReason"`
+	Explanation       string `json:"explanation"`
+	Payload           string `json:"payload"`
+	PayloadHash       string `json:"payloadHash"`
+	PreviousHash      string `json:"previousHash,omitempty"`
+	RecordHash        string `json:"recordHash"`
+	DecisionTimestamp string `json:"decisionTimestamp"`
+	BlockchainTxID    string `json:"blockchainTxId"`
+	DocType           string `json:"docType"`
+	SchemaVersion     string `json:"schemaVersion"`
+}
+
+// HistoryRecord represents one revision of the same world-state key.
 type HistoryRecord struct {
 	TxID      string             `json:"txId"`
 	Value     *TransactionRecord `json:"value"`
@@ -46,280 +77,277 @@ type HistoryRecord struct {
 	IsDelete  bool               `json:"isDelete"`
 }
 
-// InitLedger initializes the chaincode ledger. This is a no-op for the transaction
-// chaincode as no seed data is required; it simply logs that initialization completed.
+// IntegrityVerification is returned by VerifyIntegrity to show exactly what was checked.
+type IntegrityVerification struct {
+	RecordID              string `json:"recordId"`
+	PayloadHash           string `json:"payloadHash"`
+	RecomputedPayloadHash string `json:"recomputedPayloadHash"`
+	RecordHash            string `json:"recordHash"`
+	RecomputedRecordHash  string `json:"recomputedRecordHash"`
+	PreviousHash          string `json:"previousHash,omitempty"`
+	Valid                 bool   `json:"valid"`
+	VerifiedAt            string `json:"verifiedAt"`
+}
+
 func (t *TransactionChaincode) InitLedger(ctx contractapi.TransactionContextInterface) error {
-	log.Println("TransactionChaincode: InitLedger called — initialization complete")
+	log.Println("TransactionChaincode: InitLedger called")
 	return nil
 }
 
-// CreateTransaction creates a new immutable transaction record on the blockchain ledger.
-// It enforces idempotency by rejecting duplicate transaction IDs. A SHA-256 hash of
-// the core transaction fields is computed and stored for tamper detection.
-func (t *TransactionChaincode) CreateTransaction(
+// CreateRecord stores a post-fraud transaction decision using a structured JSON input payload.
+func (t *TransactionChaincode) CreateRecord(
 	ctx contractapi.TransactionContextInterface,
-	transactionID, tenantID, fromAccount, toAccount, amount, currency, txType, status string,
+	recordJSON string,
 ) (*TransactionRecord, error) {
-
-	// Idempotency check: reject if this transactionID already exists on the ledger.
-	existing, err := ctx.GetStub().GetState(transactionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read world state for transaction %q: %w", transactionID, err)
-	}
-	if existing != nil {
-		return nil, fmt.Errorf("transaction with ID %q already exists on the ledger", transactionID)
-	}
-
-	// Retrieve the deterministic transaction timestamp from the Fabric stub.
-	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction timestamp: %w", err)
-	}
-	timestamp := txTimestamp.AsTime().Format(time.RFC3339)
-
-	// Compute SHA-256 hash of the core immutable fields for tamper evidence.
-	hash := computeHash(transactionID, tenantID, fromAccount, toAccount, amount, currency)
-
-	record := &TransactionRecord{
-		TransactionID:  transactionID,
-		TenantID:       tenantID,
-		FromAccount:    fromAccount,
-		ToAccount:      toAccount,
-		Amount:         amount,
-		Currency:       currency,
-		Type:           txType,
-		Status:         status,
-		FraudScore:     0.0,
-		FraudRiskLevel: "UNKNOWN",
-		CreatedAt:      timestamp,
-		UpdatedAt:      timestamp,
-		BlockchainTxID: ctx.GetStub().GetTxID(),
-		Hash:           hash,
-		DocType:        "TRANSACTION",
-	}
-
-	recordJSON, err := json.Marshal(record)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal transaction record for %q: %w", transactionID, err)
-	}
-
-	if err := ctx.GetStub().PutState(transactionID, recordJSON); err != nil {
-		return nil, fmt.Errorf("failed to write transaction %q to world state: %w", transactionID, err)
-	}
-
-	// Emit a chaincode event so off-chain listeners can react to new transactions.
-	if err := ctx.GetStub().SetEvent("TransactionCreated", recordJSON); err != nil {
-		return nil, fmt.Errorf("failed to emit TransactionCreated event for %q: %w", transactionID, err)
-	}
-
-	return record, nil
-}
-
-// UpdateTransactionStatus updates the processing status and fraud-analysis fields of an
-// existing transaction. The core identity fields (from/to accounts, amount, currency) are
-// not modified; the stored hash is recomputed from those same immutable fields so that
-// VerifyTransactionIntegrity remains consistent.
-func (t *TransactionChaincode) UpdateTransactionStatus(
-	ctx contractapi.TransactionContextInterface,
-	transactionID, newStatus, fraudScore, fraudRiskLevel string,
-) (*TransactionRecord, error) {
-
-	record, err := t.GetTransaction(ctx, transactionID)
+	input, canonicalPayload, payloadHash, decisionTimestamp, err := parseTransactionInput(ctx, recordJSON)
 	if err != nil {
 		return nil, err
 	}
 
-	parsedFraudScore, err := strconv.ParseFloat(fraudScore, 64)
+	existing, err := ctx.GetStub().GetState(input.TransactionID)
 	if err != nil {
-		return nil, fmt.Errorf("invalid fraud score value %q — must be a parseable float64: %w", fraudScore, err)
+		return nil, fmt.Errorf("failed to read transaction %q: %w", input.TransactionID, err)
+	}
+	if existing != nil {
+		return nil, fmt.Errorf("transaction %q already exists on ledger", input.TransactionID)
 	}
 
-	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	record := &TransactionRecord{
+		TransactionID:     input.TransactionID,
+		TenantID:          input.TenantID,
+		FromAccountMasked: input.FromAccountMasked,
+		ToAccountMasked:   input.ToAccountMasked,
+		Amount:            input.Amount,
+		Currency:          input.Currency,
+		TransactionType:   input.TransactionType,
+		Status:            input.Status,
+		FraudScore:        defaultString(input.FraudScore, "UNKNOWN"),
+		RiskLevel:         defaultString(input.RiskLevel, "UNKNOWN"),
+		Decision:          defaultString(input.Decision, "UNKNOWN"),
+		DecisionReason:    input.DecisionReason,
+		Explanation:       input.Explanation,
+		Payload:           canonicalPayload,
+		PayloadHash:       payloadHash,
+		PreviousHash:      strings.TrimSpace(input.PreviousHash),
+		DecisionTimestamp: decisionTimestamp,
+		BlockchainTxID:    ctx.GetStub().GetTxID(),
+		DocType:           transactionDocType,
+		SchemaVersion:     transactionSchemaVersion,
+	}
+	record.RecordHash = computeTransactionRecordHash(record)
+
+	stored, err := json.Marshal(record)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get transaction timestamp: %w", err)
+		return nil, fmt.Errorf("failed to marshal transaction %q: %w", input.TransactionID, err)
 	}
-	updatedAt := txTimestamp.AsTime().Format(time.RFC3339)
-
-	record.Status         = newStatus
-	record.FraudScore     = parsedFraudScore
-	record.FraudRiskLevel = fraudRiskLevel
-	record.UpdatedAt      = updatedAt
-	record.BlockchainTxID = ctx.GetStub().GetTxID()
-
-	// Recompute hash from the same immutable fields used at creation time.
-	record.Hash = computeHash(
-		record.TransactionID,
-		record.TenantID,
-		record.FromAccount,
-		record.ToAccount,
-		record.Amount,
-		record.Currency,
-	)
-
-	recordJSON, err := json.Marshal(record)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal updated transaction %q: %w", transactionID, err)
+	if err := ctx.GetStub().PutState(record.TransactionID, stored); err != nil {
+		return nil, fmt.Errorf("failed to persist transaction %q: %w", input.TransactionID, err)
 	}
-
-	if err := ctx.GetStub().PutState(transactionID, recordJSON); err != nil {
-		return nil, fmt.Errorf("failed to write updated transaction %q to world state: %w", transactionID, err)
-	}
-
-	if err := ctx.GetStub().SetEvent("TransactionStatusUpdated", recordJSON); err != nil {
-		return nil, fmt.Errorf("failed to emit TransactionStatusUpdated event for %q: %w", transactionID, err)
+	if err := ctx.GetStub().SetEvent("TransactionRecordCreated", stored); err != nil {
+		return nil, fmt.Errorf("failed to emit TransactionRecordCreated for %q: %w", input.TransactionID, err)
 	}
 
 	return record, nil
 }
 
-// GetTransaction retrieves a single transaction record by its unique transaction ID.
-func (t *TransactionChaincode) GetTransaction(
+// QueryRecord fetches the current version of the transaction record by transaction ID.
+func (t *TransactionChaincode) QueryRecord(
 	ctx contractapi.TransactionContextInterface,
 	transactionID string,
 ) (*TransactionRecord, error) {
-
 	recordJSON, err := ctx.GetStub().GetState(transactionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read transaction %q from world state: %w", transactionID, err)
+		return nil, fmt.Errorf("failed to read transaction %q: %w", transactionID, err)
 	}
 	if recordJSON == nil {
-		return nil, fmt.Errorf("transaction with ID %q does not exist on the ledger", transactionID)
+		return nil, fmt.Errorf("transaction %q does not exist on ledger", transactionID)
 	}
 
 	var record TransactionRecord
 	if err := json.Unmarshal(recordJSON, &record); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal transaction record for %q: %w", transactionID, err)
+		return nil, fmt.Errorf("failed to unmarshal transaction %q: %w", transactionID, err)
 	}
 
 	return &record, nil
 }
 
-// GetTransactionHistory returns the full ledger history for a transaction key, including
-// all versions that were committed in prior blocks, with delete markers if applicable.
+// VerifyIntegrity recomputes both payload_hash and record_hash to detect tampering.
+func (t *TransactionChaincode) VerifyIntegrity(
+	ctx contractapi.TransactionContextInterface,
+	transactionID string,
+) (*IntegrityVerification, error) {
+	record, err := t.QueryRecord(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	canonicalPayload, recomputedPayloadHash, err := canonicalisePayload(record.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to canonicalise payload for %q: %w", transactionID, err)
+	}
+
+	recomputed := *record
+	recomputed.Payload = canonicalPayload
+	recomputed.PayloadHash = recomputedPayloadHash
+	recomputed.RecordHash = computeTransactionRecordHash(&recomputed)
+
+	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tx timestamp: %w", err)
+	}
+
+	return &IntegrityVerification{
+		RecordID:              transactionID,
+		PayloadHash:           record.PayloadHash,
+		RecomputedPayloadHash: recomputedPayloadHash,
+		RecordHash:            record.RecordHash,
+		RecomputedRecordHash:  recomputed.RecordHash,
+		PreviousHash:          record.PreviousHash,
+		Valid:                 record.PayloadHash == recomputedPayloadHash && record.RecordHash == recomputed.RecordHash,
+		VerifiedAt:            txTimestamp.AsTime().Format(time.RFC3339),
+	}, nil
+}
+
+// CreateTransaction is a backwards-compatible wrapper used by older scripts.
+func (t *TransactionChaincode) CreateTransaction(
+	ctx contractapi.TransactionContextInterface,
+	transactionID, tenantID, fromAccount, toAccount, amount, currency, txType, status string,
+) (*TransactionRecord, error) {
+	payload, err := json.Marshal(map[string]string{
+		"transactionId": transactionID,
+		"fromAccount":   maskAccount(fromAccount),
+		"toAccount":     maskAccount(toAccount),
+		"amount":        amount,
+		"currency":      currency,
+		"status":        status,
+		"type":          txType,
+		"source":        "legacy-wrapper",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to build legacy payload: %w", err)
+	}
+
+	recordJSON, err := json.Marshal(TransactionRecordInput{
+		TransactionID:     transactionID,
+		TenantID:          tenantID,
+		FromAccountMasked: maskAccount(fromAccount),
+		ToAccountMasked:   maskAccount(toAccount),
+		Amount:            amount,
+		Currency:          currency,
+		TransactionType:   txType,
+		Status:            status,
+		Decision:          "UNKNOWN",
+		Payload:           string(payload),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal legacy transaction input: %w", err)
+	}
+
+	return t.CreateRecord(ctx, string(recordJSON))
+}
+
+// GetTransaction is a backwards-compatible alias for QueryRecord.
+func (t *TransactionChaincode) GetTransaction(
+	ctx contractapi.TransactionContextInterface,
+	transactionID string,
+) (*TransactionRecord, error) {
+	return t.QueryRecord(ctx, transactionID)
+}
+
+// VerifyTransactionIntegrity is a backwards-compatible alias that returns only the boolean result.
+func (t *TransactionChaincode) VerifyTransactionIntegrity(
+	ctx contractapi.TransactionContextInterface,
+	transactionID string,
+) (bool, error) {
+	result, err := t.VerifyIntegrity(ctx, transactionID)
+	if err != nil {
+		return false, err
+	}
+	return result.Valid, nil
+}
+
+// GetTransactionHistory returns all committed versions of the same transaction key.
 func (t *TransactionChaincode) GetTransactionHistory(
 	ctx contractapi.TransactionContextInterface,
 	transactionID string,
 ) ([]HistoryRecord, error) {
-
 	resultsIterator, err := ctx.GetStub().GetHistoryForKey(transactionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve history for transaction %q: %w", transactionID, err)
+		return nil, fmt.Errorf("failed to retrieve history for %q: %w", transactionID, err)
 	}
 	defer resultsIterator.Close()
 
 	var history []HistoryRecord
-
 	for resultsIterator.HasNext() {
 		modification, err := resultsIterator.Next()
 		if err != nil {
-			return nil, fmt.Errorf("error iterating history for transaction %q: %w", transactionID, err)
+			return nil, fmt.Errorf("failed to iterate history for %q: %w", transactionID, err)
 		}
 
-		histEntry := HistoryRecord{
+		entry := HistoryRecord{
 			TxID:      modification.TxId,
 			Timestamp: modification.Timestamp.AsTime().Format(time.RFC3339),
 			IsDelete:  modification.IsDelete,
 		}
 
 		if !modification.IsDelete && modification.Value != nil {
-			var txRecord TransactionRecord
-			if err := json.Unmarshal(modification.Value, &txRecord); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal history value for tx %q at blockchain tx %q: %w",
+			var record TransactionRecord
+			if err := json.Unmarshal(modification.Value, &record); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal history record for %q at tx %q: %w",
 					transactionID, modification.TxId, err)
 			}
-			histEntry.Value = &txRecord
+			entry.Value = &record
 		}
 
-		history = append(history, histEntry)
+		history = append(history, entry)
 	}
 
 	return history, nil
 }
 
-// QueryTransactionsByTenant performs a CouchDB rich query to retrieve all TRANSACTION
-// records belonging to the specified tenant. This function requires CouchDB as the
-// peer state database; it will not work with the default LevelDB state database.
+// QueryTransactionsByTenant performs a CouchDB rich query and returns all transaction records for a tenant.
 func (t *TransactionChaincode) QueryTransactionsByTenant(
 	ctx contractapi.TransactionContextInterface,
 	tenantID string,
 ) ([]*TransactionRecord, error) {
-
-	queryString := fmt.Sprintf(
-		`{"selector":{"docType":"TRANSACTION","tenantId":"%s"},"use_index":["_design/indexTenantDoc","indexTenant"]}`,
-		tenantID,
-	)
+	queryString := fmt.Sprintf(`{"selector":{"docType":"%s","tenantId":"%s"}}`, transactionDocType, tenantID)
 	return executeTransactionRichQuery(ctx, queryString)
 }
 
-// QueryTransactionsByStatus performs a CouchDB rich query to retrieve all TRANSACTION
-// records for a given tenant filtered by processing status. Requires CouchDB.
-func (t *TransactionChaincode) QueryTransactionsByStatus(
+// QueryTransactionsByDecision performs a CouchDB rich query filtered by decision.
+func (t *TransactionChaincode) QueryTransactionsByDecision(
 	ctx contractapi.TransactionContextInterface,
-	tenantID, status string,
+	tenantID, decision string,
 ) ([]*TransactionRecord, error) {
-
 	queryString := fmt.Sprintf(
-		`{"selector":{"docType":"TRANSACTION","tenantId":"%s","status":"%s"}}`,
+		`{"selector":{"docType":"%s","tenantId":"%s","decision":"%s"}}`,
+		transactionDocType,
 		tenantID,
-		status,
+		decision,
 	)
 	return executeTransactionRichQuery(ctx, queryString)
 }
 
-// VerifyTransactionIntegrity recomputes the SHA-256 hash from the stored transaction
-// fields and compares it against the hash recorded at creation time. A mismatch indicates
-// that the state-database record was tampered with outside of chaincode logic.
-func (t *TransactionChaincode) VerifyTransactionIntegrity(
-	ctx contractapi.TransactionContextInterface,
-	transactionID string,
-) (bool, error) {
-
-	record, err := t.GetTransaction(ctx, transactionID)
-	if err != nil {
-		return false, err
-	}
-
-	// Recompute using the exact same fields and order as CreateTransaction.
-	expectedHash := computeHash(
-		record.TransactionID,
-		record.TenantID,
-		record.FromAccount,
-		record.ToAccount,
-		record.Amount,
-		record.Currency,
-	)
-
-	return record.Hash == expectedHash, nil
-}
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-// executeTransactionRichQuery executes the provided CouchDB selector query string and
-// collects the matching TransactionRecord values into a slice.
 func executeTransactionRichQuery(
 	ctx contractapi.TransactionContextInterface,
 	queryString string,
 ) ([]*TransactionRecord, error) {
-
 	resultsIterator, err := ctx.GetStub().GetQueryResult(queryString)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute rich query: %w", err)
+		return nil, fmt.Errorf("failed to execute transaction query: %w", err)
 	}
 	defer resultsIterator.Close()
 
 	var records []*TransactionRecord
-
 	for resultsIterator.HasNext() {
 		queryResult, err := resultsIterator.Next()
 		if err != nil {
-			return nil, fmt.Errorf("error iterating rich query results: %w", err)
+			return nil, fmt.Errorf("failed to iterate transaction query results: %w", err)
 		}
 
 		var record TransactionRecord
 		if err := json.Unmarshal(queryResult.Value, &record); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal rich query result: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal transaction query result: %w", err)
 		}
 		records = append(records, &record)
 	}
@@ -327,11 +355,125 @@ func executeTransactionRichQuery(
 	return records, nil
 }
 
-// computeHash computes a hex-encoded SHA-256 digest of the pipe-delimited concatenation
-// of all provided string fields. The pipe separator prevents hash collisions arising from
-// adjacent-field boundary ambiguity.
-func computeHash(fields ...string) string {
-	combined := strings.Join(fields, "|")
-	digest := sha256.Sum256([]byte(combined))
+func parseTransactionInput(
+	ctx contractapi.TransactionContextInterface,
+	recordJSON string,
+) (*TransactionRecordInput, string, string, string, error) {
+	var input TransactionRecordInput
+	if err := json.Unmarshal([]byte(recordJSON), &input); err != nil {
+		return nil, "", "", "", fmt.Errorf("invalid transaction record JSON: %w", err)
+	}
+
+	input.TransactionID = strings.TrimSpace(input.TransactionID)
+	input.TenantID = strings.TrimSpace(input.TenantID)
+	input.Amount = strings.TrimSpace(input.Amount)
+	input.Currency = strings.TrimSpace(strings.ToUpper(input.Currency))
+	input.TransactionType = strings.TrimSpace(strings.ToUpper(input.TransactionType))
+	input.Status = strings.TrimSpace(strings.ToUpper(input.Status))
+	input.Decision = strings.TrimSpace(strings.ToUpper(input.Decision))
+	input.FromAccountMasked = strings.TrimSpace(input.FromAccountMasked)
+	input.ToAccountMasked = strings.TrimSpace(input.ToAccountMasked)
+
+	switch {
+	case input.TransactionID == "":
+		return nil, "", "", "", fmt.Errorf("transactionId is required")
+	case input.TenantID == "":
+		return nil, "", "", "", fmt.Errorf("tenantId is required")
+	case input.Amount == "":
+		return nil, "", "", "", fmt.Errorf("amount is required")
+	case input.Currency == "":
+		return nil, "", "", "", fmt.Errorf("currency is required")
+	case input.TransactionType == "":
+		return nil, "", "", "", fmt.Errorf("transactionType is required")
+	case input.Status == "":
+		return nil, "", "", "", fmt.Errorf("status is required")
+	case input.FromAccountMasked == "":
+		return nil, "", "", "", fmt.Errorf("fromAccountMasked is required")
+	case input.ToAccountMasked == "":
+		return nil, "", "", "", fmt.Errorf("toAccountMasked is required")
+	}
+
+	canonicalPayload, payloadHash, err := canonicalisePayload(input.Payload)
+	if err != nil {
+		return nil, "", "", "", err
+	}
+
+	txTimestamp, err := ctx.GetStub().GetTxTimestamp()
+	if err != nil {
+		return nil, "", "", "", fmt.Errorf("failed to get transaction timestamp: %w", err)
+	}
+
+	decisionTimestamp := strings.TrimSpace(input.DecisionTimestamp)
+	if decisionTimestamp == "" {
+		decisionTimestamp = txTimestamp.AsTime().Format(time.RFC3339)
+	}
+
+	return &input, canonicalPayload, payloadHash, decisionTimestamp, nil
+}
+
+func canonicalisePayload(payload string) (string, string, error) {
+	trimmed := strings.TrimSpace(payload)
+	if trimmed == "" {
+		trimmed = "{}"
+	}
+
+	var payloadValue any
+	if err := json.Unmarshal([]byte(trimmed), &payloadValue); err != nil {
+		return "", "", fmt.Errorf("payload must be valid JSON: %w", err)
+	}
+
+	canonicalBytes, err := json.Marshal(payloadValue)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to canonicalise payload JSON: %w", err)
+	}
+
+	canonical := string(canonicalBytes)
+	return canonical, sha256Hex(canonical), nil
+}
+
+func computeTransactionRecordHash(record *TransactionRecord) string {
+	return sha256Hex(strings.Join([]string{
+		record.DocType,
+		record.SchemaVersion,
+		record.TransactionID,
+		record.TenantID,
+		record.FromAccountMasked,
+		record.ToAccountMasked,
+		record.Amount,
+		record.Currency,
+		record.TransactionType,
+		record.Status,
+		record.FraudScore,
+		record.RiskLevel,
+		record.Decision,
+		record.DecisionReason,
+		record.Explanation,
+		record.DecisionTimestamp,
+		record.PayloadHash,
+		record.PreviousHash,
+	}, "|"))
+}
+
+func sha256Hex(input string) string {
+	digest := sha256.Sum256([]byte(input))
 	return fmt.Sprintf("%x", digest)
+}
+
+func defaultString(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func maskAccount(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 4 {
+		return strings.Repeat("*", len(value))
+	}
+	return strings.Repeat("*", len(value)-4) + value[len(value)-4:]
 }

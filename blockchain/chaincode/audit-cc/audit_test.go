@@ -8,258 +8,177 @@ import (
 	"github.com/hyperledger/fabric-chaincode-go/pkg/cid"
 	"github.com/hyperledger/fabric-chaincode-go/shim"
 	"github.com/hyperledger/fabric-chaincode-go/shimtest"
+	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// ---------------------------------------------------------------------------
-// Mock transaction context
-// ---------------------------------------------------------------------------
-
-// MockAuditTransactionContext is a minimal implementation of
-// contractapi.TransactionContextInterface backed by a shimtest.MockStub.
-// It is used exclusively for unit-testing audit chaincode functions without
-// requiring a running Fabric peer.
 type MockAuditTransactionContext struct {
 	stub *shimtest.MockStub
 }
 
-// GetStub satisfies contractapi.TransactionContextInterface.
 func (m *MockAuditTransactionContext) GetStub() shim.ChaincodeStubInterface {
 	return m.stub
 }
 
-// GetClientIdentity satisfies contractapi.TransactionContextInterface.
-// Returns nil because no identity checks are performed in these tests.
 func (m *MockAuditTransactionContext) GetClientIdentity() cid.ClientIdentity {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
-
-// newAuditMockContext creates a fresh MockStub wired to a new AuditChaincode
-// instance, begins a mock transaction, and returns a ready context.
 func newAuditMockContext(t *testing.T, testName string) (*MockAuditTransactionContext, *shimtest.MockStub) {
 	t.Helper()
-	cc := new(AuditChaincode)
+	cc, err := contractapi.NewChaincode(&AuditChaincode{})
+	if err != nil {
+		t.Fatalf("failed to create audit contract chaincode: %v", err)
+	}
 	stub := shimtest.NewMockStub(testName, cc)
 	stub.MockTransactionStart(fmt.Sprintf("txid-%s", testName))
-	// Set a deterministic timestamp so GetTxTimestamp() does not return nil.
 	stub.TxTimestamp = timestamppb.Now()
 	return &MockAuditTransactionContext{stub: stub}, stub
 }
 
-// sampleAuditParams returns fixed parameter values reused across multiple tests.
-func sampleAuditParams() (auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload string) {
-	return "AUDIT-001",
-		"TENANT-ALPHA",
-		"TRANSACTION",
-		"TX-001",
-		"STATUS_CHANGE",
-		"USER-42",
-		"SYSTEM",
-		"192.168.1.100",
-		`{"previousStatus":"PENDING","newStatus":"COMPLETED"}`
+func sampleAuditInput() AuditRecordInput {
+	return AuditRecordInput{
+		AuditID:       "AUDIT-001",
+		TenantID:      "TENANT-ALPHA",
+		EntityType:    "TRANSACTION",
+		EntityID:      "TX-001",
+		Action:        "FRAUD_DECISION_RECORDED",
+		ActorID:       "FRAUD_ENGINE",
+		ActorType:     "SYSTEM",
+		IPAddressHash: hashOptional("192.168.1.100"),
+		TransactionID: "TX-001",
+		FraudScore:    "0.92",
+		RiskLevel:     "HIGH",
+		Decision:      "BLOCK",
+		Explanation:   "Risk exceeded policy threshold",
+		Payload: `{
+			"transactionId":"TX-001",
+			"decision":"BLOCK",
+			"riskLevel":"HIGH"
+		}`,
+		PreviousHash: "prev-audit-hash-001",
+		OccurredAt:   "2026-04-23T10:35:00Z",
+	}
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-// TestCreateAuditEntry verifies that CreateAuditEntry persists the audit record
-// with all expected field values and writes a non-nil value to the ledger state.
-func TestCreateAuditEntry(t *testing.T) {
-	ctx, stub := newAuditMockContext(t, "TestCreateAuditEntry")
-	cc := &AuditChaincode{}
-
-	auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload := sampleAuditParams()
-
-	record, err := cc.CreateAuditEntry(ctx, auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload)
+func marshalAuditInput(t *testing.T, input AuditRecordInput) string {
+	t.Helper()
+	value, err := json.Marshal(input)
 	if err != nil {
-		t.Fatalf("CreateAuditEntry returned unexpected error: %v", err)
+		t.Fatalf("failed to marshal audit input: %v", err)
 	}
-
-	// Verify returned struct fields.
-	if record.AuditID != auditID {
-		t.Errorf("AuditID: got %q, want %q", record.AuditID, auditID)
-	}
-	if record.TenantID != tenantID {
-		t.Errorf("TenantID: got %q, want %q", record.TenantID, tenantID)
-	}
-	if record.EntityType != entityType {
-		t.Errorf("EntityType: got %q, want %q", record.EntityType, entityType)
-	}
-	if record.EntityID != entityID {
-		t.Errorf("EntityID: got %q, want %q", record.EntityID, entityID)
-	}
-	if record.Action != action {
-		t.Errorf("Action: got %q, want %q", record.Action, action)
-	}
-	if record.ActorID != actorID {
-		t.Errorf("ActorID: got %q, want %q", record.ActorID, actorID)
-	}
-	if record.ActorType != actorType {
-		t.Errorf("ActorType: got %q, want %q", record.ActorType, actorType)
-	}
-	if record.IPAddress != ipAddr {
-		t.Errorf("IPAddress: got %q, want %q", record.IPAddress, ipAddr)
-	}
-	if record.Payload != payload {
-		t.Errorf("Payload: got %q, want %q", record.Payload, payload)
-	}
-	if record.DocType != "AUDIT" {
-		t.Errorf("DocType: got %q, want %q", record.DocType, "AUDIT")
-	}
-	if record.Hash == "" {
-		t.Error("Hash must not be empty after CreateAuditEntry")
-	}
-	if record.BlockchainTxID == "" {
-		t.Error("BlockchainTxID must not be empty after CreateAuditEntry")
-	}
-	if record.OccurredAt == "" {
-		t.Error("OccurredAt must not be empty after CreateAuditEntry")
-	}
-
-	// Verify that the state was persisted to the ledger.
-	stateBytes := stub.State[auditID]
-	if stateBytes == nil {
-		t.Fatal("expected non-nil state after CreateAuditEntry, got nil")
-	}
-
-	var storedRecord AuditRecord
-	if err := json.Unmarshal(stateBytes, &storedRecord); err != nil {
-		t.Fatalf("failed to unmarshal stored audit state: %v", err)
-	}
-	if storedRecord.AuditID != auditID {
-		t.Errorf("stored AuditID: got %q, want %q", storedRecord.AuditID, auditID)
-	}
+	return string(value)
 }
 
-// TestCreateAuditEntryIdempotency verifies that creating a second audit entry with
-// the same ID returns an error (idempotency enforcement).
-func TestCreateAuditEntryIdempotency(t *testing.T) {
-	ctx, _ := newAuditMockContext(t, "TestAuditIdempotency")
+func TestCreateAudit(t *testing.T) {
+	ctx, stub := newAuditMockContext(t, "TestCreateAudit")
 	cc := &AuditChaincode{}
+	input := sampleAuditInput()
 
-	auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload := sampleAuditParams()
-
-	if _, err := cc.CreateAuditEntry(ctx, auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload); err != nil {
-		t.Fatalf("first CreateAuditEntry failed unexpectedly: %v", err)
-	}
-
-	_, err := cc.CreateAuditEntry(ctx, auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload)
-	if err == nil {
-		t.Fatal("second CreateAuditEntry with same ID should return an error but did not")
-	}
-}
-
-// TestGetAuditEntry verifies that GetAuditEntry correctly retrieves a record that
-// was previously written to the ledger by CreateAuditEntry.
-func TestGetAuditEntry(t *testing.T) {
-	ctx, _ := newAuditMockContext(t, "TestGetAuditEntry")
-	cc := &AuditChaincode{}
-
-	auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload := sampleAuditParams()
-
-	created, err := cc.CreateAuditEntry(ctx, auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload)
+	record, err := cc.CreateAudit(ctx, marshalAuditInput(t, input))
 	if err != nil {
-		t.Fatalf("CreateAuditEntry failed: %v", err)
+		t.Fatalf("CreateAudit returned unexpected error: %v", err)
 	}
 
-	retrieved, err := cc.GetAuditEntry(ctx, auditID)
-	if err != nil {
-		t.Fatalf("GetAuditEntry returned unexpected error: %v", err)
+	if record.AuditID != input.AuditID {
+		t.Fatalf("AuditID: got %q want %q", record.AuditID, input.AuditID)
+	}
+	if record.PayloadHash == "" {
+		t.Fatal("PayloadHash must be populated")
+	}
+	if record.RecordHash == "" {
+		t.Fatal("RecordHash must be populated")
+	}
+	if record.TransactionID != input.TransactionID {
+		t.Fatalf("TransactionID: got %q want %q", record.TransactionID, input.TransactionID)
 	}
 
-	if retrieved.AuditID != created.AuditID {
-		t.Errorf("AuditID mismatch: got %q, want %q", retrieved.AuditID, created.AuditID)
-	}
-	if retrieved.Hash != created.Hash {
-		t.Errorf("Hash mismatch: got %q, want %q", retrieved.Hash, created.Hash)
-	}
-	if retrieved.Action != action {
-		t.Errorf("Action mismatch: got %q, want %q", retrieved.Action, action)
-	}
-	if retrieved.Payload != payload {
-		t.Errorf("Payload mismatch: got %q, want %q", retrieved.Payload, payload)
+	state := stub.State[input.AuditID]
+	if state == nil {
+		t.Fatal("expected audit record to be written to mock ledger")
 	}
 }
 
-// TestGetAuditEntryNotFound verifies that GetAuditEntry returns a descriptive error
-// when the requested audit ID does not exist on the ledger.
-func TestGetAuditEntryNotFound(t *testing.T) {
-	ctx, _ := newAuditMockContext(t, "TestGetAuditEntryNotFound")
+func TestCreateAuditIdempotency(t *testing.T) {
+	ctx, _ := newAuditMockContext(t, "TestCreateAuditIdempotency")
+	cc := &AuditChaincode{}
+	input := sampleAuditInput()
+
+	if _, err := cc.CreateAudit(ctx, marshalAuditInput(t, input)); err != nil {
+		t.Fatalf("first CreateAudit failed unexpectedly: %v", err)
+	}
+	if _, err := cc.CreateAudit(ctx, marshalAuditInput(t, input)); err == nil {
+		t.Fatal("second CreateAudit with same auditId should fail")
+	}
+}
+
+func TestQueryRecordNotFound(t *testing.T) {
+	ctx, _ := newAuditMockContext(t, "TestAuditQueryRecordNotFound")
 	cc := &AuditChaincode{}
 
-	_, err := cc.GetAuditEntry(ctx, "NON-EXISTENT-AUDIT-99999")
-	if err == nil {
-		t.Fatal("GetAuditEntry for a missing key should return an error but returned nil")
+	if _, err := cc.QueryRecord(ctx, "missing-audit"); err == nil {
+		t.Fatal("QueryRecord should fail for a missing audit record")
 	}
 }
 
-// TestVerifyAuditIntegrity verifies two scenarios:
-//  1. A freshly created audit entry passes the integrity check (hash matches).
-//  2. A record whose ActorID field has been directly tampered in the state
-//     database (while the stored hash remains the original) fails the check.
 func TestVerifyAuditIntegrity(t *testing.T) {
 	ctx, stub := newAuditMockContext(t, "TestVerifyAuditIntegrity")
 	cc := &AuditChaincode{}
+	input := sampleAuditInput()
 
-	auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload := sampleAuditParams()
-
-	record, err := cc.CreateAuditEntry(ctx, auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload)
+	record, err := cc.CreateAudit(ctx, marshalAuditInput(t, input))
 	if err != nil {
-		t.Fatalf("CreateAuditEntry failed: %v", err)
+		t.Fatalf("CreateAudit failed: %v", err)
 	}
 
-	// Step 1 — untampered record must pass integrity check.
-	valid, err := cc.VerifyAuditIntegrity(ctx, auditID)
+	verification, err := cc.VerifyIntegrity(ctx, input.AuditID)
 	if err != nil {
-		t.Fatalf("VerifyAuditIntegrity failed: %v", err)
+		t.Fatalf("VerifyIntegrity failed: %v", err)
 	}
-	if !valid {
-		t.Fatal("integrity check should pass for an untampered audit record but returned false")
+	if !verification.Valid {
+		t.Fatal("expected untampered audit record to validate successfully")
 	}
 
-	// Step 2 — simulate a direct state-database tamper:
-	// modify ActorID without updating the stored hash.
-	record.ActorID = "ATTACKER-999" // tampered — hash not updated
-	// record.Hash is intentionally left as the original value
-
-	tamperedJSON, err := json.Marshal(record)
+	record.Decision = "ALLOW"
+	tampered, err := json.Marshal(record)
 	if err != nil {
 		t.Fatalf("failed to marshal tampered audit record: %v", err)
 	}
-	stub.State[auditID] = tamperedJSON // bypass chaincode and write directly to state
+	stub.State[input.AuditID] = tampered
 
-	// Step 3 — tampered record must fail the integrity check.
-	valid, err = cc.VerifyAuditIntegrity(ctx, auditID)
+	verification, err = cc.VerifyIntegrity(ctx, input.AuditID)
 	if err != nil {
-		t.Fatalf("VerifyAuditIntegrity failed after tamper: %v", err)
+		t.Fatalf("VerifyIntegrity after tamper failed: %v", err)
 	}
-	if valid {
-		t.Fatal("integrity check should fail for a tampered audit record but returned true")
+	if verification.Valid {
+		t.Fatal("expected tampered audit record to fail verification")
 	}
 }
 
-// TestVerifyAuditIntegrityHashConsistency verifies that the hash computed by
-// auditComputeHash is deterministic and reflects the correct field order.
-func TestVerifyAuditIntegrityHashConsistency(t *testing.T) {
-	ctx, _ := newAuditMockContext(t, "TestHashConsistency")
+func TestCreateAuditEntryLegacyWrapper(t *testing.T) {
+	ctx, _ := newAuditMockContext(t, "TestCreateAuditEntryLegacyWrapper")
 	cc := &AuditChaincode{}
 
-	auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload := sampleAuditParams()
-
-	record, err := cc.CreateAuditEntry(ctx, auditID, tenantID, entityType, entityID, action, actorID, actorType, ipAddr, payload)
+	record, err := cc.CreateAuditEntry(
+		ctx,
+		"AUDIT-LEGACY",
+		"TENANT-A",
+		"TRANSACTION",
+		"TX-123",
+		"CREATE",
+		"SERVICE-A",
+		"SYSTEM",
+		"10.0.0.1",
+		`{"source":"legacy-wrapper"}`,
+	)
 	if err != nil {
-		t.Fatalf("CreateAuditEntry failed: %v", err)
+		t.Fatalf("CreateAuditEntry legacy wrapper failed: %v", err)
 	}
 
-	// Independently compute the expected hash using the same helper function.
-	expectedHash := auditComputeHash(auditID, tenantID, entityType, entityID, action, actorID)
-	if record.Hash != expectedHash {
-		t.Errorf("stored hash does not match independently computed hash.\n  stored:   %q\n  computed: %q",
-			record.Hash, expectedHash)
+	if record.IPAddressHash == "" {
+		t.Fatal("legacy wrapper should hash ipAddress before storing it")
+	}
+	if record.ActorType != "SYSTEM" {
+		t.Fatalf("expected actor type SYSTEM, got %q", record.ActorType)
 	}
 }

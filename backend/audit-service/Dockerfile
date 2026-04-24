@@ -2,9 +2,10 @@
 # Audit Service – Multi-stage Docker build
 # =============================================================================
 
-FROM maven:3.9.6-eclipse-temurin-25-alpine AS deps
+FROM maven:3.9.6-eclipse-temurin-21-alpine AS deps
 
 WORKDIR /workspace
+ENV MAVEN_OPTS="-Dmaven.wagon.http.retryHandler.count=5 -Dmaven.wagon.rto=600000 -Dmaven.wagon.http.pool=false -Daether.connector.basic.threads=1"
 
 # Parent POM
 COPY pom.xml ./pom.xml
@@ -18,13 +19,6 @@ COPY transaction-service/pom.xml transaction-service/pom.xml
 COPY blockchain-service/pom.xml  blockchain-service/pom.xml
 COPY audit-service/pom.xml       audit-service/pom.xml
 
-# Pre-fetch dependencies (best-effort; failures tolerated)
-RUN mvn dependency:go-offline \
-        -pl shared,audit-service \
-        -am \
-        --no-transfer-progress \
-        -q || true
-
 FROM deps AS builder
 
 WORKDIR /workspace
@@ -32,14 +26,15 @@ WORKDIR /workspace
 COPY shared/src      shared/src
 COPY audit-service/src audit-service/src
 
-RUN mvn install \
+RUN --mount=type=cache,id=bbss-m2,target=/root/.m2 \
+    mvn install \
         -pl shared,audit-service \
         -am \
         -DskipTests \
         --no-transfer-progress \
         -q
 
-FROM eclipse-temurin:25-jre-alpine AS runner
+FROM eclipse-temurin:21-jre-alpine AS runner
 
 RUN addgroup --system --gid 1001 appgroup \
  && adduser  --system --uid 1001 --ingroup appgroup --no-create-home appuser
@@ -64,6 +59,6 @@ ENV JAVA_OPTS="\
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
 
-LABEL org.opencontainers.image.title="BBSS Audit Service" \
+LABEL org.opencontainers.image.title="Civic Savings Audit Service" \
       org.opencontainers.image.description="Blockchain-anchored immutable audit trail service" \
       org.opencontainers.image.version="1.0.0"

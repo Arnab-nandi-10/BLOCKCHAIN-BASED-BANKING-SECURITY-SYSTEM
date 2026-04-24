@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# network-down.sh — Stop and clean the BBSS Hyperledger Fabric network
+# network-down.sh — Stop and clean the Civic Savings Hyperledger Fabric network
 #
 # What this script does:
 #   1. Stops and removes all Fabric Docker containers (with volumes)
@@ -122,7 +122,7 @@ remove_generated_artifacts() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
-    log_section "BBSS Blockchain Banking Security System — Network Teardown"
+    log_section "Civic Savings Blockchain Banking Security System — Network Teardown"
 
     stop_docker_services
     remove_chaincode_images

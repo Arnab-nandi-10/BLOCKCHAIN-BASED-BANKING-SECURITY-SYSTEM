@@ -5,9 +5,9 @@ apiVersion: 1
 # Ref: https://grafana.com/docs/grafana/latest/administration/provisioning/#dashboards
 
 providers:
-  - name: 'BBSS Dashboards'
+  - name: 'Civic Savings Dashboards'
     orgId: 1
-    folder: 'BBSS Monitoring'
+    folder: 'Civic Savings Monitoring'
     type: file
     disableDeletion: false
     updateIntervalSeconds: 30

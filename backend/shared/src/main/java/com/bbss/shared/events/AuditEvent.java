@@ -11,14 +11,14 @@ import java.time.LocalDateTime;
 
 /**
  * Kafka domain event emitted whenever an auditable action occurs within the
- * BBSS platform.
+ * Civic Savings platform.
  *
  * <p>Every significant state change – user login, transaction creation,
  * tenant provisioning, role modification – should produce an {@code AuditEvent}
  * so that the {@code audit-service} can build an immutable, append-only audit
  * trail.
  *
- * <p>Producers: every BBSS microservice
+ * <p>Producers: every Civic Savings microservice
  * <br>Consumers: {@code audit-service} exclusively
  *
  * <p>Topic naming convention: {@code bbss.audit.events}

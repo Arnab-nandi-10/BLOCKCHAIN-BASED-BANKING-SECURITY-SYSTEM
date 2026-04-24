@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the HashiCorp Vault integration for centralized secrets management across the BBSS microservices architecture.
+This document describes the HashiCorp Vault integration for centralized secrets management across the Civic Savings microservices architecture.
 
 ## Architecture
 

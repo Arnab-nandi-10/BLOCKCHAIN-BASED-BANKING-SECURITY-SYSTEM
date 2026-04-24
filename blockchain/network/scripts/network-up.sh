@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# network-up.sh — Start the BBSS Hyperledger Fabric development network
+# network-up.sh — Start the Civic Savings Hyperledger Fabric development network
 #
 # Responsibilities:
 #   1. Verify all prerequisite tools are available
@@ -194,7 +194,7 @@ create_and_join_channel() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
-    log_section "BBSS Blockchain Banking Security System — Network Bootstrap"
+    log_section "Civic Savings Blockchain Banking Security System — Network Bootstrap"
 
     check_prerequisites
     clean_previous_artifacts

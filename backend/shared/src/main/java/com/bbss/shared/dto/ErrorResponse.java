@@ -9,7 +9,7 @@ import java.util.List;
 
 /**
  * Standardised error response body returned by {@link com.bbss.shared.exception.GlobalExceptionHandler}
- * for every non-2xx HTTP response emitted by BBSS microservices.
+ * for every non-2xx HTTP response emitted by Civic Savings microservices.
  *
  * <p>The {@code validationErrors} field is only serialised when it contains at
  * least one entry; all other {@code null} fields are suppressed by

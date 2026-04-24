@@ -3,7 +3,7 @@
 #
 # Used by the `cryptogen` tool to generate TLS certificates, signing
 # certificates, and MSP directories for all orderer and peer nodes in the
-# BBSS (Blockchain Banking Security System) network.
+# Civic Savings (Blockchain Banking Security System) network.
 #
 # Run:
 #   cryptogen generate --config=config/crypto-config.yaml \

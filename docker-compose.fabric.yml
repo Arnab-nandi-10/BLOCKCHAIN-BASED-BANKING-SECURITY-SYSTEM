@@ -1,0 +1,21 @@
+networks:
+  bbss-fabric-network:
+    external: true
+
+services:
+  blockchain-service:
+    environment:
+      FABRIC_ENABLED: ${FABRIC_ENABLED:-true}
+      FABRIC_PEER_ENDPOINT: peer0.org1.bbss.com:7051
+      FABRIC_PEER_HOST_ALIAS: peer0.org1.bbss.com
+      FABRIC_MSP_ID: Org1MSP
+      FABRIC_TLS_CERT_PATH: /etc/hyperledger/fabric/crypto/tls/ca.crt
+      FABRIC_CERT_PATH: /etc/hyperledger/fabric/crypto/signcerts/cert.pem
+      FABRIC_KEYSTORE_PATH: /etc/hyperledger/fabric/crypto/keystore
+    volumes:
+      - ./blockchain/network/organizations/peerOrganizations/org1.bbss.com/peers/peer0.org1.bbss.com/tls:/etc/hyperledger/fabric/crypto/tls:ro
+      - ./blockchain/network/organizations/peerOrganizations/org1.bbss.com/users/Admin@org1.bbss.com/msp/signcerts:/etc/hyperledger/fabric/crypto/signcerts:ro
+      - ./blockchain/network/organizations/peerOrganizations/org1.bbss.com/users/Admin@org1.bbss.com/msp/keystore:/etc/hyperledger/fabric/crypto/keystore:ro
+    networks:
+      - bbss-network
+      - bbss-fabric-network

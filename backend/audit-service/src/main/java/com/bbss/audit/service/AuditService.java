@@ -3,20 +3,25 @@ package com.bbss.audit.service;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.bbss.audit.client.BlockchainServiceClient;
 import com.bbss.audit.domain.model.AuditEntry;
 import com.bbss.audit.domain.model.AuditStatus;
 import com.bbss.audit.domain.repository.AuditRepository;
+import com.bbss.audit.dto.AuditQueryFilters;
 import com.bbss.audit.dto.AuditResponse;
 import com.bbss.audit.dto.AuditSummaryResponse;
 import com.bbss.shared.events.AuditEvent;
@@ -73,7 +78,7 @@ public class AuditService {
      *       be retried by the scheduler.</li>
      * </ol>
      *
-     * @param event the shared-library event produced by any BBSS microservice
+    * @param event the shared-library event produced by any Civic Savings microservice
      * @return the persisted {@link AuditEntry} (status may still be PENDING at
      *         the time of return)
      */
@@ -108,8 +113,9 @@ public class AuditService {
         log.info("Audit entry persisted: auditId={} tenantId={} action={}",
                 saved.getAuditId(), saved.getTenantId(), saved.getAction());
 
-        // 4. Async blockchain commit (fire-and-forget; retried on failure) ────
-        blockchainCommitService.commitToBlockchainAsync(saved.getId());
+        // 4. Trigger blockchain commit only after the audit row is committed so the
+        // async worker can always load it in a separate transaction.
+        scheduleBlockchainCommit(saved.getId());
 
         return saved;
     }
@@ -129,7 +135,7 @@ public class AuditService {
      * @throws ResourceNotFoundException if no entry exists for the given auditId
      *         and tenantId combination
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public AuditResponse getAuditEntry(String auditId, String tenantId) {
         AuditEntry entry = auditRepository.findByAuditId(auditId)
                 .filter(e -> e.getTenantId().equals(tenantId))
@@ -150,9 +156,12 @@ public class AuditService {
      * Returns a paginated list of all audit entries for a tenant, most recent first.
      */
     @Transactional(readOnly = true)
-    public Page<AuditResponse> listAuditEntries(String tenantId, Pageable pageable) {
+    public Page<AuditResponse> listAuditEntries(
+            String tenantId,
+            AuditQueryFilters filters,
+            Pageable pageable) {
         return auditRepository
-                .findByTenantIdOrderByOccurredAtDesc(tenantId, pageable)
+                .findAll(buildSpecification(tenantId, filters), pageable)
                 .map(this::toAuditResponse);
     }
 
@@ -165,9 +174,11 @@ public class AuditService {
             String entityType,
             String entityId,
             Pageable pageable) {
-        return auditRepository
-                .findByTenantIdAndEntityTypeAndEntityId(tenantId, entityType, entityId, pageable)
-                .map(this::toAuditResponse);
+        return listAuditEntries(
+                tenantId,
+            new AuditQueryFilters(entityType, entityId, null, null, null, null, null, null),
+                pageable
+        );
     }
 
     /**
@@ -175,9 +186,11 @@ public class AuditService {
      */
     @Transactional(readOnly = true)
     public Page<AuditResponse> listByAction(String tenantId, String action, Pageable pageable) {
-        return auditRepository
-                .findByTenantIdAndAction(tenantId, action, pageable)
-                .map(this::toAuditResponse);
+        return listAuditEntries(
+                tenantId,
+            new AuditQueryFilters(null, null, action, null, null, null, null, null),
+                pageable
+        );
     }
 
     /**
@@ -190,9 +203,11 @@ public class AuditService {
             LocalDateTime from,
             LocalDateTime to,
             Pageable pageable) {
-        return auditRepository
-                .findByTenantIdAndOccurredAtBetween(tenantId, from, to, pageable)
-                .map(this::toAuditResponse);
+        return listAuditEntries(
+                tenantId,
+            new AuditQueryFilters(null, null, null, null, null, null, from, to),
+                pageable
+        );
     }
 
     /**
@@ -206,6 +221,7 @@ public class AuditService {
 
         long totalEntries   = auditRepository.countByTenantId(tenantId);
         long last24hEntries = auditRepository.countByTenantIdAndOccurredAtBetween(tenantId, yesterday, now);
+        long committedEntries = auditRepository.countByTenantIdAndStatus(tenantId, AuditStatus.COMMITTED);
         long pendingEntries = auditRepository.countByTenantIdAndStatus(tenantId, AuditStatus.PENDING);
         long failedEntries  = auditRepository.countByTenantIdAndStatus(tenantId, AuditStatus.FAILED);
 
@@ -217,16 +233,52 @@ public class AuditService {
                         (a, b) -> a,
                         LinkedHashMap::new
                 ));
+        Map<String, Long> verificationCounts = new LinkedHashMap<>();
+        verificationCounts.put("NOT_VERIFIED", 0L);
+        verificationCounts.put("VERIFIED", 0L);
+        verificationCounts.put("HASH_MISMATCH", 0L);
+        verificationCounts.put("UNAVAILABLE", 0L);
+
+        auditRepository.findAll(byTenant(tenantId)).stream()
+                .map(AuditEntry::getVerificationStatus)
+                .filter(status -> status != null && !status.isBlank())
+                .map(status -> status.trim().toUpperCase(Locale.ROOT))
+                .collect(Collectors.groupingBy(s -> s, LinkedHashMap::new, Collectors.counting()))
+                .forEach(verificationCounts::put);
 
         return AuditSummaryResponse.builder()
                 .tenantId(tenantId)
                 .totalEntries(totalEntries)
                 .last24hEntries(last24hEntries)
+                .committedToBlockchain(committedEntries)
                 .pendingEntries(pendingEntries)
+                .pending(pendingEntries)
                 .failedEntries(failedEntries)
+                .failed(failedEntries)
+                .verificationCounts(verificationCounts)
+                .verifiedRecords(verificationCounts.getOrDefault("VERIFIED", 0L))
+                .hashMismatchRecords(verificationCounts.getOrDefault("HASH_MISMATCH", 0L))
+                .verificationUnavailableRecords(verificationCounts.getOrDefault("UNAVAILABLE", 0L))
                 .actionBreakdown(actionBreakdown)
                 .generatedAt(now)
                 .build();
+    }
+
+    @Transactional
+    public void updateVerificationStatus(String auditId, String verificationStatus) {
+        if (verificationStatus == null || verificationStatus.isBlank()) {
+            return;
+        }
+
+        auditRepository.findByAuditId(auditId).ifPresent(entry -> {
+            if (verificationStatus.equals(entry.getVerificationStatus())) {
+                return;
+            }
+
+            entry.setVerificationStatus(verificationStatus);
+            auditRepository.save(entry);
+            log.info("Audit entry {} verification status refreshed to {}", auditId, verificationStatus);
+        });
     }
 
     // ── Scheduled retry ───────────────────────────────────────────────────────
@@ -273,20 +325,36 @@ public class AuditService {
         }
     }
 
+    private void scheduleBlockchainCommit(java.util.UUID entryId) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    blockchainCommitService.commitToBlockchainAsync(entryId);
+                }
+            });
+            return;
+        }
+
+        blockchainCommitService.commitToBlockchainAsync(entryId);
+    }
+
     /**
-     * Queries the blockchain-service to refresh the block number on a COMMITTED
-     * entry.  Any error is silently absorbed.
+     * Queries the blockchain-service to refresh the verification status on a
+     * COMMITTED audit entry. Any error is silently absorbed.
      */
     private void refreshBlockchainDetails(AuditEntry entry) {
+        if (entry.getAuditId() == null || entry.getAuditId().isBlank()) {
+            return;
+        }
         try {
-            // Call blockchain-service through circuit-breaker-protected adapter
-            BlockchainServiceClient.BlockchainTransactionResponse txResp =
-                    blockchainClientAdapter.getTransaction(entry.getBlockchainTxId());
+            BlockchainServiceClient.BlockchainVerificationResponse verification =
+                    blockchainClientAdapter.verifyAudit(entry.getAuditId());
 
-            if (txResp != null
-                    && txResp.blockNumber() != null
-                    && !txResp.blockNumber().equals(entry.getBlockNumber())) {
-                entry.setBlockNumber(txResp.blockNumber());
+            if (verification != null
+                    && verification.verificationStatus() != null
+                    && !verification.verificationStatus().equals(entry.getVerificationStatus())) {
+                entry.setVerificationStatus(verification.verificationStatus());
                 auditRepository.save(entry);
             }
         } catch (FeignException e) {
@@ -314,9 +382,83 @@ public class AuditService {
                 .payload(entry.getPayload())
                 .blockchainTxId(entry.getBlockchainTxId())
                 .blockNumber(entry.getBlockNumber())
+                .verificationStatus(entry.getVerificationStatus())
                 .status(entry.getStatus())
                 .correlationId(entry.getCorrelationId())
                 .occurredAt(entry.getOccurredAt())
                 .build();
+    }
+
+    private Specification<AuditEntry> buildSpecification(String tenantId, AuditQueryFilters filters) {
+        return byTenant(tenantId)
+                .and(matchesEntityType(filters != null ? filters.entityType() : null))
+                .and(matchesEntityId(filters != null ? filters.entityId() : null))
+                .and(matchesAction(filters != null ? filters.action() : null))
+                .and(matchesStatus(filters != null ? filters.status() : null))
+                .and(matchesVerificationStatus(filters != null ? filters.verificationStatus() : null))
+                .and(matchesSearch(filters != null ? filters.search() : null))
+                .and(occurredAfter(filters != null ? filters.fromDate() : null))
+                .and(occurredBefore(filters != null ? filters.toDate() : null));
+    }
+
+    private Specification<AuditEntry> byTenant(String tenantId) {
+        return (root, query, cb) -> cb.equal(root.get("tenantId"), tenantId);
+    }
+
+    private Specification<AuditEntry> matchesEntityType(String entityType) {
+        if (entityType == null || entityType.isBlank()) {
+            return null;
+        }
+        return (root, query, cb) -> cb.equal(cb.upper(root.get("entityType")), entityType.trim().toUpperCase(Locale.ROOT));
+    }
+
+    private Specification<AuditEntry> matchesAction(String action) {
+        if (action == null || action.isBlank()) {
+            return null;
+        }
+        return (root, query, cb) -> cb.equal(cb.upper(root.get("action")), action.trim().toUpperCase(Locale.ROOT));
+    }
+
+    private Specification<AuditEntry> matchesEntityId(String entityId) {
+        if (entityId == null || entityId.isBlank()) {
+            return null;
+        }
+        return (root, query, cb) -> cb.equal(root.get("entityId"), entityId.trim());
+    }
+
+    private Specification<AuditEntry> matchesStatus(AuditStatus status) {
+        return status == null ? null : (root, query, cb) -> cb.equal(root.get("status"), status);
+    }
+
+    private Specification<AuditEntry> matchesVerificationStatus(String verificationStatus) {
+        if (verificationStatus == null || verificationStatus.isBlank()) {
+            return null;
+        }
+        return (root, query, cb) -> cb.equal(
+                cb.upper(root.get("verificationStatus")),
+                verificationStatus.trim().toUpperCase(Locale.ROOT)
+        );
+    }
+
+    private Specification<AuditEntry> matchesSearch(String search) {
+        if (search == null || search.isBlank()) {
+            return null;
+        }
+        String pattern = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+        return (root, query, cb) -> cb.or(
+                cb.like(cb.lower(root.get("auditId")), pattern),
+                cb.like(cb.lower(root.get("entityId")), pattern),
+                cb.like(cb.lower(root.get("action")), pattern),
+                cb.like(cb.lower(root.get("actorId")), pattern),
+                cb.like(cb.lower(root.get("blockchainTxId")), pattern)
+        );
+    }
+
+    private Specification<AuditEntry> occurredAfter(LocalDateTime fromDate) {
+        return fromDate == null ? null : (root, query, cb) -> cb.greaterThanOrEqualTo(root.get("occurredAt"), fromDate);
+    }
+
+    private Specification<AuditEntry> occurredBefore(LocalDateTime toDate) {
+        return toDate == null ? null : (root, query, cb) -> cb.lessThanOrEqualTo(root.get("occurredAt"), toDate);
     }
 }

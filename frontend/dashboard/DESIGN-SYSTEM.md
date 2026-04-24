@@ -665,4 +665,4 @@ For questions or issues:
 
 **Version:** 1.0.0  
 **Last Updated:** March 2026  
-**Design System:** BBSS Modern SaaS UI
+**Design System:** Civic Savings Modern SaaS UI

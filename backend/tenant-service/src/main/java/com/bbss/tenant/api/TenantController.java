@@ -26,7 +26,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/tenants")
-@Tag(name = "Tenant Management", description = "APIs for managing tenants in the BBSS platform")
+@Tag(name = "Tenant Management", description = "APIs for managing tenants in the Civic Savings platform")
 public class TenantController {
 
     private final TenantService tenantService;

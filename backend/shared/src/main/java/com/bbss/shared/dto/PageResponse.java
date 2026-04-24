@@ -12,7 +12,7 @@ import java.util.List;
  *
  * <p>Controllers should return this type (wrapped in {@link ApiResponse}) for
  * every endpoint that returns a list of resources, ensuring a consistent
- * pagination envelope across all BBSS services:
+ * pagination envelope across all Civic Savings services:
  *
  * <pre>{@code
  * Page<TransactionDto> page = transactionService.findAll(tenantId, pageable);

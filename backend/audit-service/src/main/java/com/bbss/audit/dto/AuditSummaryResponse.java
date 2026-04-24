@@ -30,11 +30,17 @@ public class AuditSummaryResponse {
      */
     private final long last24hEntries;
 
+    /** Number of entries successfully anchored to blockchain. */
+    private final long committedToBlockchain;
+
     /**
      * Number of entries in {@link com.bbss.audit.domain.model.AuditStatus#PENDING}
      * state (i.e. not yet anchored on the blockchain).
      */
     private final long pendingEntries;
+
+    /** Alias used by the dashboard UI. */
+    private final long pending;
 
     /**
      * Number of entries in {@link com.bbss.audit.domain.model.AuditStatus#FAILED}
@@ -42,6 +48,21 @@ public class AuditSummaryResponse {
      * for retry).
      */
     private final long failedEntries;
+
+    /** Alias used by the dashboard UI. */
+    private final long failed;
+
+    /** Counts grouped by verification outcome. */
+    private final Map<String, Long> verificationCounts;
+
+    /** Number of audit records currently verified successfully. */
+    private final long verifiedRecords;
+
+    /** Number of audit records with hash mismatches. */
+    private final long hashMismatchRecords;
+
+    /** Number of audit records whose verification is unavailable. */
+    private final long verificationUnavailableRecords;
 
     /**
      * Distribution of audit entries by action verb for the tenant.

@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * Feign client for the blockchain-service microservice.
@@ -50,7 +51,13 @@ public interface BlockchainServiceClient {
      * @param currency      ISO 4217 currency code
      * @param type          transaction type name
      * @param status        current transaction status
+     * @param fraudScore    fraud score captured before ledger anchoring
+     * @param riskLevel     fraud risk level captured before ledger anchoring
+     * @param decision      business decision captured before ledger anchoring
+     * @param decisionReason explanation for the decision
      * @param timestamp     transaction creation timestamp
+     * @param ipAddress     originating IP address used for correlation
+     * @param metadata      optional metadata hashed for explainability
      */
     record BlockchainSubmitRequest(
             String transactionId,
@@ -61,7 +68,13 @@ public interface BlockchainServiceClient {
             String currency,
             String type,
             String status,
-            LocalDateTime timestamp
+            Double fraudScore,
+            String riskLevel,
+            String decision,
+            String decisionReason,
+            LocalDateTime timestamp,
+            String ipAddress,
+            Map<String, String> metadata
     ) {}
 
     /**
@@ -70,6 +83,11 @@ public interface BlockchainServiceClient {
      * @param transactionId  echoed business transaction ID
      * @param blockchainTxId the Hyperledger Fabric transaction hash
      * @param blockNumber    the block number where the transaction was committed
+     * @param ledgerStatus   current ledger state
+     * @param verificationStatus latest integrity verification status
+     * @param payloadHash    SHA-256 digest of the sanitised payload
+     * @param recordHash     SHA-256 digest of the anchored record
+     * @param previousHash   optional hash link to the previous committed record
      * @param success        true when the submission succeeded
      * @param message        informational message (error description on failure)
      */
@@ -77,6 +95,11 @@ public interface BlockchainServiceClient {
             String transactionId,
             String blockchainTxId,
             String blockNumber,
+            String ledgerStatus,
+            String verificationStatus,
+            String payloadHash,
+            String recordHash,
+            String previousHash,
             boolean success,
             String message
     ) {}
@@ -87,6 +110,11 @@ public interface BlockchainServiceClient {
      * @param transactionId  business transaction ID
      * @param blockchainTxId the Hyperledger Fabric transaction hash
      * @param blockNumber    block number where the transaction was committed
+     * @param ledgerStatus   ledger commit state
+     * @param verificationStatus latest integrity verification status
+     * @param payloadHash    SHA-256 digest of the sanitised payload
+     * @param recordHash     SHA-256 digest of the anchored record
+     * @param previousHash   optional link to the previous record hash
      * @param status         on-chain status
      * @param timestamp      block commit timestamp
      */
@@ -94,6 +122,11 @@ public interface BlockchainServiceClient {
             String transactionId,
             String blockchainTxId,
             String blockNumber,
+            String ledgerStatus,
+            String verificationStatus,
+            String payloadHash,
+            String recordHash,
+            String previousHash,
             String status,
             LocalDateTime timestamp
     ) {}

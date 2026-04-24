@@ -89,7 +89,7 @@ public class KafkaConfig {
         configProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         configProps.put(JsonDeserializer.TRUSTED_PACKAGES, "com.bbss.shared.events,com.bbss.blockchain.messaging");
         configProps.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
-        configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, "com.bbss.shared.events.AuditEvent");
+        configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, "java.util.LinkedHashMap");
         return new DefaultKafkaConsumerFactory<>(configProps);
     }
 

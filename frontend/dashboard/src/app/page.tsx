@@ -102,7 +102,7 @@ export default function LandingPage() {
               <ShieldCheck size={14} className="text-white" />
             </div>
             <span className="font-bold text-sm tracking-tight" style={{ color: 'var(--text-primary)' }}>
-              BBSS
+              Civic Savings
             </span>
             <span className="hidden text-xs sm:inline" style={{ color: 'var(--text-muted)' }}>
               Blockchain Banking Security
@@ -260,7 +260,7 @@ export default function LandingPage() {
             </p>
           </div>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            BBSS v1.0.0 · Blockchain Banking Security System
+            Civic Savings v1.0.0 · Blockchain Banking Security System
           </p>
         </div>
       </footer>

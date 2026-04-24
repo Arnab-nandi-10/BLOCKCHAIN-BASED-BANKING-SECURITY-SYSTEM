@@ -15,7 +15,7 @@ RESET := \033[0m
 
 .PHONY: help \
         setup \
-        dev-up dev-down dev-build dev-logs dev-clean \
+        dev-up dev-up-fabric dev-down dev-build dev-logs dev-clean \
         fabric-up fabric-down fabric-deploy \
         test-backend test-fraud \
         migrate \
@@ -66,6 +66,10 @@ setup: ## Copy .env.example to .env and create required local directories
 dev-up: ## Start all services in detached mode
 	docker compose up -d
 	@printf "$(GREEN)All services started. Dashboard: http://localhost:5000  Gateway: http://localhost:8080$(RESET)\n"
+
+dev-up-fabric: ## Restart blockchain-service with the real Fabric override (run fabric-up and fabric-deploy first)
+	docker compose -f docker-compose.yml -f docker-compose.fabric.yml up -d blockchain-service
+	@printf "$(GREEN)blockchain-service restarted with the Fabric override. Ensure the Fabric network and chaincodes are already up.$(RESET)\n"
 
 dev-down: ## Stop all running services (keeps volumes)
 	docker compose down

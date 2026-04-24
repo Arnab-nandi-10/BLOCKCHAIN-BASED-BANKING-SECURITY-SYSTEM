@@ -126,6 +126,7 @@ resilience4j:
 services:
   blockchain-service:
     url: ${BLOCKCHAIN_SERVICE_URL:http://blockchain-service:8084}
+    internal-token: ${BLOCKCHAIN_SERVICE_INTERNAL_TOKEN:${INTERNAL_SERVICE_TOKEN:bbss-internal-service-token}}
 
 # ── OpenFeign ────────────────────────────────────────────────────────────────
 feign:

@@ -6,6 +6,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -31,4 +33,12 @@ public interface BlockchainRecordRepository extends JpaRepository<BlockchainReco
      * @return page of blockchain records
      */
     Page<BlockchainRecord> findByTenantIdOrderByCreatedAtDesc(String tenantId, Pageable pageable);
+
+    Optional<BlockchainRecord> findTopByTenantIdAndLedgerStatusOrderByCreatedAtDesc(
+            String tenantId,
+            String ledgerStatus);
+
+    List<BlockchainRecord> findTop50ByLedgerStatusAndNextRetryAtLessThanEqualOrderByCreatedAtAsc(
+            String ledgerStatus,
+            LocalDateTime nextRetryAt);
 }

@@ -1,4 +1,4 @@
-# Blockchain Banking Security System (BBSS)
+# Blockchain Banking Security System (Civic Savings)
 
 A production-grade, multi-tenant banking security platform that anchors
 financial transactions on a permissioned Hyperledger Fabric blockchain,
@@ -121,6 +121,22 @@ docker compose ps
 
 All services should show status **healthy** or **running** within 90 seconds.
 
+### 5. Enable Real Hyperledger Fabric
+
+`make dev-up` keeps the platform available even before the Fabric network has
+been started. When you want the blockchain service to use the real Fabric
+gateway instead of the fallback controller, run:
+
+```bash
+make fabric-up
+make fabric-deploy
+make dev-up-fabric
+```
+
+The `dev-up-fabric` target applies [`docker-compose.fabric.yml`](docker-compose.fabric.yml),
+which mounts the generated org admin certificates into `blockchain-service` and
+attaches it to the `bbss-fabric-network`.
+
 ---
 
 ## Service URLs
@@ -146,6 +162,7 @@ All services should show status **healthy** or **running** within 90 seconds.
 make help             Print all available targets
 make setup            Copy .env.example and scaffold directories
 make dev-up           Start all services in detached mode
+make dev-up-fabric    Restart blockchain-service with the real Fabric override
 make dev-down         Stop all services (keeps volumes)
 make dev-build        Rebuild all Docker images
 make dev-logs         Stream logs from all services

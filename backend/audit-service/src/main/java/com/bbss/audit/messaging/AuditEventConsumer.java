@@ -23,10 +23,14 @@ import java.util.UUID;
  *
  * <p>Subscribed topics:
  * <ul>
+ *   <li>{@code tx.submitted}       – transaction was created and accepted by transaction-service</li>
  *   <li>{@code tx.verified}        – transaction passed validation</li>
  *   <li>{@code tx.blocked}         – transaction was permanently rejected</li>
  *   <li>{@code fraud.alert}        – fraud engine detected a high-risk transaction</li>
  *   <li>{@code tenant.provisioned} – a new tenant was successfully onboarded</li>
+ *   <li>{@code block.committed}    – transaction was successfully anchored on Fabric</li>
+ *   <li>{@code block.commit.failed} – ledger anchoring is pending and will be retried</li>
+ *   <li>{@code auth.user.registered} – a new tenant user was created</li>
  * </ul>
  *
  * <p>Deserialization strategy: the Kafka consumer is configured with
@@ -43,10 +47,14 @@ import java.util.UUID;
 @Slf4j
 public class AuditEventConsumer {
 
+    private static final String TOPIC_TX_SUBMITTED       = "tx.submitted";
     private static final String TOPIC_TX_VERIFIED        = "tx.verified";
     private static final String TOPIC_TX_BLOCKED         = "tx.blocked";
     private static final String TOPIC_FRAUD_ALERT        = "fraud.alert";
     private static final String TOPIC_TENANT_PROVISIONED = "tenant.provisioned";
+    private static final String TOPIC_BLOCK_COMMITTED    = "block.committed";
+    private static final String TOPIC_BLOCK_COMMIT_FAILED = "block.commit.failed";
+    private static final String TOPIC_AUTH_USER_REGISTERED = "auth.user.registered";
 
     private final AuditService  auditService;
     private final ObjectMapper  objectMapper;
@@ -59,7 +67,16 @@ public class AuditEventConsumer {
      *               {@code Map<String, Object>} after JSON deserialization
      */
     @KafkaListener(
-        topics  = { TOPIC_TX_VERIFIED, TOPIC_TX_BLOCKED, TOPIC_FRAUD_ALERT, TOPIC_TENANT_PROVISIONED },
+        topics  = {
+            TOPIC_TX_SUBMITTED,
+            TOPIC_TX_VERIFIED,
+            TOPIC_TX_BLOCKED,
+            TOPIC_FRAUD_ALERT,
+            TOPIC_TENANT_PROVISIONED,
+            TOPIC_BLOCK_COMMITTED,
+            TOPIC_BLOCK_COMMIT_FAILED,
+            TOPIC_AUTH_USER_REGISTERED
+        },
         groupId = "audit-service"
     )
     public void consume(ConsumerRecord<String, Object> record) {
@@ -93,10 +110,14 @@ public class AuditEventConsumer {
      */
     private AuditEvent buildAuditEvent(String topic, Map<String, Object> data) {
         return switch (topic) {
+            case TOPIC_TX_SUBMITTED       -> fromTransactionEvent(data, "TRANSACTION_SUBMITTED");
             case TOPIC_TX_VERIFIED        -> fromTransactionEvent(data, "TRANSACTION_VERIFIED");
             case TOPIC_TX_BLOCKED         -> fromTransactionEvent(data, "TRANSACTION_BLOCKED");
             case TOPIC_FRAUD_ALERT        -> fromFraudAlertEvent(data);
             case TOPIC_TENANT_PROVISIONED -> fromTenantEvent(data);
+            case TOPIC_BLOCK_COMMITTED    -> fromBlockchainCommitEvent(data);
+            case TOPIC_BLOCK_COMMIT_FAILED -> fromBlockchainCommitFailedEvent(data);
+            case TOPIC_AUTH_USER_REGISTERED -> fromUserRegisteredEvent(data);
             default -> {
                 log.warn("Unrecognised Kafka topic: {}", topic);
                 yield null;
@@ -195,6 +216,76 @@ public class AuditEventConsumer {
     }
 
     /**
+     * Maps a {@code block.committed} payload to an {@link AuditEvent}.
+     */
+    private AuditEvent fromBlockchainCommitEvent(Map<String, Object> data) {
+        String eventId = stringValue(data.get("eventId"), UUID.randomUUID().toString());
+        String tenantId = stringValue(data.get("tenantId"), "UNKNOWN");
+        String transactionId = stringValue(data.get("transactionId"), "UNKNOWN");
+
+        return AuditEvent.builder()
+                .eventId(eventId)
+                .tenantId(tenantId)
+                .entityType("TRANSACTION")
+                .entityId(transactionId)
+                .action("BLOCKCHAIN_COMMITTED")
+                .actorId("BLOCKCHAIN_SERVICE")
+                .actorType("SYSTEM")
+                .ipAddress(null)
+                .payload(data)
+                .occurredAt(dateTimeValue(data.get("timestamp")))
+                .correlationId(null)
+                .build();
+    }
+
+    /**
+     * Maps a {@code block.commit.failed} payload to an {@link AuditEvent}.
+     */
+    private AuditEvent fromBlockchainCommitFailedEvent(Map<String, Object> data) {
+        String eventId = stringValue(data.get("eventId"), UUID.randomUUID().toString());
+        String tenantId = stringValue(data.get("tenantId"), "UNKNOWN");
+        String transactionId = stringValue(data.get("transactionId"), "UNKNOWN");
+
+        return AuditEvent.builder()
+                .eventId(eventId)
+                .tenantId(tenantId)
+                .entityType("TRANSACTION")
+                .entityId(transactionId)
+                .action("BLOCKCHAIN_PENDING")
+                .actorId("BLOCKCHAIN_SERVICE")
+                .actorType("SYSTEM")
+                .ipAddress(null)
+                .payload(data)
+                .occurredAt(dateTimeValue(data.get("timestamp")))
+                .correlationId(null)
+                .build();
+    }
+
+    /**
+     * Maps an {@code auth.user.registered} payload to an {@link AuditEvent}.
+     */
+    private AuditEvent fromUserRegisteredEvent(Map<String, Object> data) {
+        String eventId = stringValue(data.get("eventId"), UUID.randomUUID().toString());
+        String tenantId = stringValue(data.get("tenantId"), "UNKNOWN");
+        String userId = stringValue(data.get("userId"), "UNKNOWN");
+        String actorId = stringValue(data.get("email"), "AUTH_SERVICE");
+
+        return AuditEvent.builder()
+                .eventId(eventId)
+                .tenantId(tenantId)
+                .entityType("USER")
+                .entityId(userId)
+                .action("USER_REGISTERED")
+                .actorId(actorId)
+                .actorType("SYSTEM")
+                .ipAddress(null)
+                .payload(data)
+                .occurredAt(dateTimeValue(data.get("registeredAt")))
+                .correlationId(null)
+                .build();
+    }
+
+    /**
      * Safely converts the Kafka record value (already deserialized as a
      * {@code Map<String, Object>} by the Spring Kafka JSON deserializer) to
      * a typed map.  If for any reason the value is not a Map (e.g. a plain
@@ -215,5 +306,28 @@ public class AuditEventConsumer {
             }
         }
         return objectMapper.convertValue(value, new TypeReference<Map<String, Object>>() {});
+    }
+
+    private String stringValue(Object value, String fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        String text = value.toString();
+        return text.isBlank() ? fallback : text;
+    }
+
+    private LocalDateTime dateTimeValue(Object value) {
+        if (value == null) {
+            return LocalDateTime.now();
+        }
+        if (value instanceof LocalDateTime dateTime) {
+            return dateTime;
+        }
+        try {
+            return LocalDateTime.parse(value.toString());
+        } catch (Exception ex) {
+            log.debug("Could not parse audit event timestamp '{}': {}", value, ex.getMessage());
+            return LocalDateTime.now();
+        }
     }
 }

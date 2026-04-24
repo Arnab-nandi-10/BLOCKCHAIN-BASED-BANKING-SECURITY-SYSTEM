@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # docker-compose-fabric.yml
-# Hyperledger Fabric 2.5 network for BBSS (Blockchain Banking Security System)
+# Hyperledger Fabric 2.5 network for Civic Savings (Blockchain Banking Security System)
 #
 # Topology:
 #   - 1 Solo Orderer  (orderer.bbss.com : 7050)

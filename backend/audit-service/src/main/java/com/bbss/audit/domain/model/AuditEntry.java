@@ -25,7 +25,7 @@ import java.util.UUID;
 /**
  * Persistent record of a single auditable platform event.
  *
- * <p>Every significant state change produced by any BBSS service is captured as
+ * <p>Every significant state change produced by any Civic Savings service is captured as
  * an {@code AuditEntry} and anchored on the blockchain ledger.  The combination
  * of the relational database record and the blockchain transaction ID forms an
  * immutable, tamper-evident log.
@@ -133,6 +133,10 @@ public class AuditEntry {
     /** Block number on the ledger where this audit record was anchored. */
     @Column(name = "block_number", length = 50)
     private String blockNumber;
+
+    /** Latest integrity verification result returned by blockchain-service. */
+    @Column(name = "verification_status", length = 32)
+    private String verificationStatus;
 
     // ── Status ────────────────────────────────────────────────────────────────
 

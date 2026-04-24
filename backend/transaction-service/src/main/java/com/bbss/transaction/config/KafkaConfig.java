@@ -2,12 +2,14 @@ package com.bbss.transaction.config;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -75,8 +77,8 @@ public class KafkaConfig {
     }
 
     @Bean
-    public KafkaTemplate<String, Object> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
+    public KafkaTemplate<String, Object> kafkaTemplate(ProducerFactory<String, Object> producerFactory) {
+        return new KafkaTemplate<>(Objects.requireNonNull(producerFactory, "producerFactory"));
     }
 
     // -------------------------------------------------------------------------
@@ -84,7 +86,16 @@ public class KafkaConfig {
     // -------------------------------------------------------------------------
 
     @Bean
-    public ConsumerFactory<String, Object> consumerFactory() {
+    public ConsumerFactory<String, Object> fraudAlertConsumerFactory() {
+        return createConsumerFactory("com.bbss.shared.events.FraudAlertEvent");
+    }
+
+    @Bean
+    public ConsumerFactory<String, Object> blockchainConsumerFactory() {
+        return createConsumerFactory("java.util.Map");
+    }
+
+    private ConsumerFactory<String, Object> createConsumerFactory(String defaultValueType) {
         Map<String, Object> configProps = new HashMap<>();
         configProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         configProps.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
@@ -94,7 +105,7 @@ public class KafkaConfig {
         configProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         configProps.put(JsonDeserializer.TRUSTED_PACKAGES, "com.bbss.shared.events,com.bbss.transaction.messaging");
         configProps.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
-        configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, "com.bbss.shared.events.FraudAlertEvent");
+        configProps.put(JsonDeserializer.VALUE_DEFAULT_TYPE, defaultValueType);
         return new DefaultKafkaConsumerFactory<>(configProps);
     }
 
@@ -121,12 +132,11 @@ public class KafkaConfig {
      */
     @Bean
     public CommonErrorHandler errorHandler(
-            KafkaTemplate<String, Object> kafkaTemplate,
-            MeterRegistry meterRegistry) {
+            KafkaTemplate<String, Object> kafkaTemplate) {
 
         // Dead Letter Publishing Recoverer
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
-                kafkaTemplate,
+            Objects.requireNonNull(kafkaTemplate, "kafkaTemplate"),
                 (record, ex) -> {
                     String originalTopic = record.topic();
                     String dltTopic = originalTopic + ".dlt";
@@ -174,16 +184,31 @@ public class KafkaConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory(
-            ConsumerFactory<String, Object> consumerFactory,
+            @Qualifier("fraudAlertConsumerFactory") ConsumerFactory<String, Object> consumerFactory,
             CommonErrorHandler errorHandler) {
 
         ConcurrentKafkaListenerContainerFactory<String, Object> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
+        factory.setConsumerFactory(Objects.requireNonNull(consumerFactory, "consumerFactory"));
         factory.setConcurrency(3);
         factory.getContainerProperties().setAckMode(
                 org.springframework.kafka.listener.ContainerProperties.AckMode.MANUAL);
-        factory.setCommonErrorHandler(errorHandler);
+        factory.setCommonErrorHandler(Objects.requireNonNull(errorHandler, "errorHandler"));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, Object> blockchainKafkaListenerContainerFactory(
+            @Qualifier("blockchainConsumerFactory") ConsumerFactory<String, Object> consumerFactory,
+            CommonErrorHandler errorHandler) {
+
+        ConcurrentKafkaListenerContainerFactory<String, Object> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(Objects.requireNonNull(consumerFactory, "consumerFactory"));
+        factory.setConcurrency(3);
+        factory.getContainerProperties().setAckMode(
+                org.springframework.kafka.listener.ContainerProperties.AckMode.MANUAL);
+        factory.setCommonErrorHandler(Objects.requireNonNull(errorHandler, "errorHandler"));
         return factory;
     }
 }

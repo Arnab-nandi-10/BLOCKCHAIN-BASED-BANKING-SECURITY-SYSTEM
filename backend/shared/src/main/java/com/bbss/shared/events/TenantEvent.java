@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 
 /**
  * Kafka domain event published when the lifecycle state of a tenant changes
- * inside the BBSS platform.
+ * inside the Civic Savings platform.
  *
  * <p>Producers: {@code tenant-service}
  * <br>Consumers: every microservice that must react to tenant provisioning or

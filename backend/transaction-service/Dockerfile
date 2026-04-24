@@ -1,15 +1,16 @@
 # =============================================================================
 # Multi-stage build for transaction-service
 # Stage 1: Build with Maven
-# Stage 2: Runtime with eclipse-temurin:25-jre-alpine
+# Stage 2: Runtime with eclipse-temurin:21-jre-alpine
 # =============================================================================
 
 # ---------------------------------------------------------------------------
 # Stage 1 — Build
 # ---------------------------------------------------------------------------
-FROM maven:3.9.6-eclipse-temurin-25-alpine AS build
+FROM maven:3.9.6-eclipse-temurin-21-alpine AS build
 
 WORKDIR /workspace
+ENV MAVEN_OPTS="-Dmaven.wagon.http.retryHandler.count=5 -Dmaven.wagon.rto=600000 -Dmaven.wagon.http.pool=false -Daether.connector.basic.threads=1"
 
 # Copy the parent POM and shared module first to leverage Docker layer caching.
 # Adjust paths if your project layout differs.
@@ -24,18 +25,13 @@ COPY blockchain-service/pom.xml  blockchain-service/pom.xml
 COPY audit-service/pom.xml       audit-service/pom.xml
 COPY transaction-service/pom.xml transaction-service/pom.xml
 
-# Download dependencies in a cacheable layer.
-RUN mvn -B dependency:go-offline \
-    -pl transaction-service \
-    -am \
-    --no-transfer-progress || true
-
 # Copy source only for what we need to compile
 COPY shared/src           shared/src
 COPY transaction-service/src transaction-service/src
 
 # Build, skipping tests (tests should run in CI, not during image build).
-RUN mvn -B package \
+RUN --mount=type=cache,id=bbss-m2,target=/root/.m2 \
+    mvn -B package \
     -pl transaction-service \
     -am \
     -DskipTests \
@@ -44,7 +40,7 @@ RUN mvn -B package \
 # ---------------------------------------------------------------------------
 # Stage 2 — Runtime
 # ---------------------------------------------------------------------------
-FROM eclipse-temurin:25-jre-alpine AS runtime
+FROM eclipse-temurin:21-jre-alpine AS runtime
 
 # Non-root user for security hardening.
 RUN addgroup -S bbss && adduser -S bbss -G bbss

@@ -72,21 +72,22 @@ fabric:
   chaincode-audit: ${FABRIC_CHAINCODE_AUDIT:audit-cc}
   msp-id: ${FABRIC_MSP_ID:Org1MSP}
   # Absolute path to the TLS root CA certificate PEM for the peer
-  tls-cert-path: ${FABRIC_TLS_CERT_PATH:/crypto/organizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt}
+  tls-cert-path: ${FABRIC_TLS_CERT_PATH:/crypto/organizations/org1.bbss.com/peers/peer0.org1.bbss.com/tls/ca.crt}
   # Absolute path to the signing certificate PEM for the client identity
-  cert-path: ${FABRIC_CERT_PATH:/crypto/organizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts/cert.pem}
+  cert-path: ${FABRIC_CERT_PATH:/crypto/organizations/org1.bbss.com/users/Admin@org1.bbss.com/msp/signcerts/cert.pem}
   # Absolute path to the directory containing the private key PEM
-  keystore-path: ${FABRIC_KEYSTORE_PATH:/crypto/organizations/org1.example.com/users/Admin@org1.example.com/msp/keystore}
+  keystore-path: ${FABRIC_KEYSTORE_PATH:/crypto/organizations/org1.bbss.com/users/Admin@org1.bbss.com/msp/keystore}
   # gRPC peer endpoint (host:port)
-  peer-endpoint: ${FABRIC_PEER_ENDPOINT:peer0.org1.example.com:7051}
+  peer-endpoint: ${FABRIC_PEER_ENDPOINT:peer0.org1.bbss.com:7051}
   # Override authority for TLS SNI matching
-  peer-host-alias: ${FABRIC_PEER_HOST_ALIAS:peer0.org1.example.com}
+  peer-host-alias: ${FABRIC_PEER_HOST_ALIAS:peer0.org1.bbss.com}
 
 # Security
 security:
   jwt:
     secret: ${JWT_SECRET:blockchain-banking-security-jwt-secret-key-256bits}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  internal-token: ${INTERNAL_SERVICE_TOKEN:bbss-internal-service-token}
 
 # Resilience4j Circuit Breaker configuration
 resilience4j:

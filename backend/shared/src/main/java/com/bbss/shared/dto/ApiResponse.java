@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
- * Generic API response envelope used by every REST endpoint in the BBSS platform.
+ * Generic API response envelope used by every REST endpoint in the Civic Savings platform.
  *
  * <p>Callers use the static factory methods rather than the Lombok builder directly
  * so that {@code timestamp} and {@code requestId} are always populated consistently.

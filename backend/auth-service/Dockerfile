@@ -1,6 +1,7 @@
-FROM maven:3.9.6-eclipse-temurin-25-alpine AS build
+FROM maven:3.9.6-eclipse-temurin-21-alpine AS build
 
 WORKDIR /workspace
+ENV MAVEN_OPTS="-Dmaven.wagon.http.retryHandler.count=5 -Dmaven.wagon.rto=600000 -Dmaven.wagon.http.pool=false -Daether.connector.basic.threads=1"
 
 COPY pom.xml ./pom.xml
 # All module POM stubs — required for Maven multi-module reactor validation
@@ -12,13 +13,12 @@ COPY blockchain-service/pom.xml  blockchain-service/pom.xml
 COPY audit-service/pom.xml       audit-service/pom.xml
 COPY auth-service/pom.xml        auth-service/pom.xml
 
-RUN mvn -B dependency:go-offline -pl auth-service -am --no-transfer-progress || true
-
 COPY shared/src shared/src
 COPY auth-service/src auth-service/src
-RUN mvn -B package -pl auth-service -am -DskipTests --no-transfer-progress
+RUN --mount=type=cache,id=bbss-m2,target=/root/.m2 \
+    mvn -B package -pl auth-service -am -DskipTests --no-transfer-progress
 
-FROM eclipse-temurin:25-jre-alpine
+FROM eclipse-temurin:21-jre-alpine
 
 RUN addgroup -S bbss && adduser -S bbss -G bbss
 

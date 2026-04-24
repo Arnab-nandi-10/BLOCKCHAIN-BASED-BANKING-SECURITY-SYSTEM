@@ -3,7 +3,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import Cookies from 'js-cookie'
-import type { User, AuthResponse } from '@/types'
+import type { User, AuthResponse, AuthUserInfo } from '@/types'
 
 // ─── State shape ──────────────────────────────────────────────────────────────
 
@@ -17,6 +17,7 @@ interface AuthState {
 
 interface AuthActions {
   setAuth: (response: AuthResponse) => void
+  syncUserProfile: (profile: AuthUserInfo) => void
   clearAuth: () => void
   setLoading: (loading: boolean) => void
 }
@@ -57,6 +58,25 @@ export const useAuthStore = create<AuthStore>()(
           tenantId: response.tenantId,
           isAuthenticated: true,
           isLoading: false,
+        })
+      },
+
+      syncUserProfile: (profile: AuthUserInfo) => {
+        set((state) => {
+          const tenantId = state.user?.tenantId ?? state.tenantId
+
+          if (!tenantId) {
+            return {}
+          }
+
+          return {
+            user: {
+              ...profile,
+              tenantId,
+            },
+            isAuthenticated: true,
+            isLoading: false,
+          }
         })
       },
 

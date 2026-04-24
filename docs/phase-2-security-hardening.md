@@ -2,7 +2,7 @@
 
 ## Overview
 
-Phase 2 implements enterprise-grade security features across the BBSS platform including JWT token rotation, HashiCorp Vault secrets management, mTLS service communication, and Role-Based Access Control (RBAC).
+Phase 2 implements enterprise-grade security features across the Civic Savings platform including JWT token rotation, HashiCorp Vault secrets management, mTLS service communication, and Role-Based Access Control (RBAC).
 
 ## Completed Features
 
@@ -233,7 +233,7 @@ server:
 # 1. Generate CA
 openssl req -x509 -newkey rsa:4096 -days 365 -nodes \
   -keyout ca-key.pem -out ca-cert.pem \
-  -subj "/CN=BBSS Root CA"
+  -subj "/CN=Civic Savings Root CA"
 
 # 2. Generate service certificates (example: transaction-service)
 openssl req -newkey rsa:4096 -nodes \

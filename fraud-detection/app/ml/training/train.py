@@ -1,4 +1,4 @@
-"""Standalone training script for the BBSS fraud-detection model.
+"""Standalone training script for the Civic Savings fraud-detection model.
 
 Run from the repository root:
     python app/ml/training/train.py
@@ -6,39 +6,32 @@ Run from the repository root:
 Artifacts are written to:
     app/ml/artifacts/fraud_model.pkl
     app/ml/artifacts/scaler.pkl
-
-These paths match the defaults in app/core/config.py and are also baked
-into the Docker image via the RUN instruction in the Dockerfile.
+    app/ml/artifacts/model_metadata.json
 """
 
+from __future__ import annotations
+
+import json
 import logging
 import os
 import sys
-from typing import Tuple
+from datetime import datetime, timezone
 
 import joblib
 import numpy as np
-import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import (
-    accuracy_score,
-    classification_report,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
+from sklearn.metrics import classification_report, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
-# ---------------------------------------------------------------------------
-# Path configuration — resolve artifacts relative to this file so the script
-# works regardless of where it is invoked from.
-# ---------------------------------------------------------------------------
-_SCRIPT_DIR: str = os.path.dirname(os.path.abspath(__file__))
-ARTIFACT_DIR: str = os.path.normpath(os.path.join(_SCRIPT_DIR, "..", "artifacts"))
-MODEL_PATH: str = os.path.join(ARTIFACT_DIR, "fraud_model.pkl")
-SCALER_PATH: str = os.path.join(ARTIFACT_DIR, "scaler.pkl")
+from app.core.config import settings
+from app.services.feature_engineering import FEATURE_NAMES, TOTAL_FEATURES
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ARTIFACT_DIR = os.path.normpath(os.path.join(_SCRIPT_DIR, "..", "artifacts"))
+MODEL_PATH = os.path.join(ARTIFACT_DIR, "fraud_model.pkl")
+SCALER_PATH = os.path.join(ARTIFACT_DIR, "scaler.pkl")
+METADATA_PATH = os.path.join(ARTIFACT_DIR, "model_metadata.json")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,214 +41,175 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Random seed for reproducibility across all stages
-_RNG_SEED: int = 42
 
+def generate_synthetic_data(n_samples: int = 20_000) -> tuple[np.ndarray, np.ndarray]:
+    """Generate synthetic fraud data aligned with the online feature vector."""
+    rng = np.random.default_rng(42)
 
-# ---------------------------------------------------------------------------
-# Synthetic data generation
-# ---------------------------------------------------------------------------
+    X = np.zeros((n_samples, TOTAL_FEATURES), dtype=np.float64)
 
-def generate_synthetic_data(n_samples: int = 10_000) -> pd.DataFrame:
-    """Generate a synthetic transaction dataset with realistic fraud patterns.
+    amount = np.clip(rng.lognormal(mean=8.5, sigma=1.15, size=n_samples), 10.0, 1_200_000.0)
+    avg_amount = np.clip(rng.lognormal(mean=7.9, sigma=0.7, size=n_samples), 50.0, 400_000.0)
+    amount_ratio = amount / np.maximum(avg_amount, 1.0)
+    unusual_hour = rng.binomial(1, 0.14, size=n_samples)
+    same_account = rng.binomial(1, 0.01, size=n_samples)
+    cross_border = rng.binomial(1, 0.10, size=n_samples)
+    kyc_high = rng.binomial(1, 0.12, size=n_samples)
+    receiver_new = rng.binomial(1, 0.18, size=n_samples)
+    velocity_10m = rng.poisson(lam=0.4, size=n_samples)
+    velocity_1h = velocity_10m + rng.poisson(lam=1.2, size=n_samples)
+    structuring = rng.binomial(1, 0.05, size=n_samples)
+    wallet_high = rng.binomial(1, 0.08, size=n_samples)
+    sanctions = rng.binomial(1, 0.002, size=n_samples)
 
-    Feature layout (50 columns + fraud_label)
-    ------------------------------------------
-    0  amount               — log-normal, clipped to [1, 1 000 000]
-    1  amount_log           — log1p(amount)
-    2  is_high_amount       — 1 if amount > 50 000
-    3  is_very_high_amount  — 1 if amount > 500 000
-    4  hour_of_day          — uniform int [0, 23]
-    5  is_unusual_hour      — 1 if hour <= 5
-    6  is_weekend           — 1 if weekday in {5, 6}
-    7  currency_risk        — 0 = USD/EUR/GBP, 1 = other
-    8  transaction_type     — 0=TRANSFER 1=PAYMENT 2=WITHDRAWAL 3=DEPOSIT
-    9  from_account_hash    — uniform float [0, 1)
-    10 to_account_hash      — uniform float [0, 1)
-    11 same_account         — 1 if from == to  (~1 % of rows)
-    12-49 feature_12..49    — random noise (future feature slots)
-    fraud_label             — binary target (~3-8 % fraud rate)
-    """
-    rng = np.random.RandomState(_RNG_SEED)
+    X[:, FEATURE_NAMES.index("amount")] = amount
+    X[:, FEATURE_NAMES.index("amount_log")] = np.log1p(amount)
+    X[:, FEATURE_NAMES.index("amount_sqrt")] = np.sqrt(amount)
+    X[:, FEATURE_NAMES.index("amount_gt_50k")] = (amount >= 50_000.0).astype(float)
+    X[:, FEATURE_NAMES.index("amount_gt_500k")] = (amount >= 500_000.0).astype(float)
+    X[:, FEATURE_NAMES.index("amount_gt_1m")] = (amount >= 1_000_000.0).astype(float)
+    X[:, FEATURE_NAMES.index("hour_of_day")] = rng.integers(0, 24, size=n_samples)
+    X[:, FEATURE_NAMES.index("is_unusual_hour")] = unusual_hour
+    X[:, FEATURE_NAMES.index("tx_type_transfer")] = rng.binomial(1, 0.45, size=n_samples)
+    X[:, FEATURE_NAMES.index("tx_type_payment")] = rng.binomial(1, 0.30, size=n_samples)
+    X[:, FEATURE_NAMES.index("tx_type_withdrawal")] = rng.binomial(1, 0.15, size=n_samples)
+    X[:, FEATURE_NAMES.index("tx_type_deposit")] = rng.binomial(1, 0.10, size=n_samples)
+    currency_low_risk = rng.binomial(1, 0.82, size=n_samples)
+    currency_high_risk = (1 - currency_low_risk) * rng.binomial(1, 0.35, size=n_samples)
+    X[:, FEATURE_NAMES.index("currency_low_risk")] = currency_low_risk
+    X[:, FEATURE_NAMES.index("currency_high_risk")] = currency_high_risk
+    X[:, FEATURE_NAMES.index("network_permissioned")] = rng.binomial(1, 0.75, size=n_samples)
+    X[:, FEATURE_NAMES.index("network_public")] = 1.0 - X[:, FEATURE_NAMES.index("network_permissioned")]
+    X[:, FEATURE_NAMES.index("same_account")] = same_account
+    X[:, FEATURE_NAMES.index("cross_border")] = cross_border
+    X[:, FEATURE_NAMES.index("from_hash_mod")] = rng.random(n_samples)
+    X[:, FEATURE_NAMES.index("to_hash_mod")] = rng.random(n_samples)
+    X[:, FEATURE_NAMES.index("account_prefix_match")] = rng.binomial(1, 0.03, size=n_samples)
+    X[:, FEATURE_NAMES.index("from_digit_ratio")] = rng.uniform(0.1, 0.9, size=n_samples)
+    X[:, FEATURE_NAMES.index("to_digit_ratio")] = rng.uniform(0.1, 0.9, size=n_samples)
+    X[:, FEATURE_NAMES.index("from_pattern_score")] = rng.uniform(0.0, 1.0, size=n_samples)
+    X[:, FEATURE_NAMES.index("to_pattern_score")] = rng.uniform(0.0, 1.0, size=n_samples)
+    X[:, FEATURE_NAMES.index("origin_country_high_risk")] = rng.binomial(1, 0.05, size=n_samples)
+    X[:, FEATURE_NAMES.index("destination_country_high_risk")] = rng.binomial(1, 0.06, size=n_samples)
+    X[:, FEATURE_NAMES.index("kyc_verified")] = 1.0 - kyc_high
+    X[:, FEATURE_NAMES.index("kyc_risk_low")] = rng.binomial(1, 0.50, size=n_samples)
+    X[:, FEATURE_NAMES.index("kyc_risk_medium")] = rng.binomial(1, 0.38, size=n_samples)
+    X[:, FEATURE_NAMES.index("kyc_risk_high")] = kyc_high
+    X[:, FEATURE_NAMES.index("receiver_verified")] = 1.0 - receiver_new
+    X[:, FEATURE_NAMES.index("wallet_risk_low")] = rng.binomial(1, 0.65, size=n_samples)
+    X[:, FEATURE_NAMES.index("wallet_risk_medium")] = rng.binomial(1, 0.27, size=n_samples)
+    X[:, FEATURE_NAMES.index("wallet_risk_high")] = wallet_high
+    X[:, FEATURE_NAMES.index("sanctions_hit")] = sanctions
+    X[:, FEATURE_NAMES.index("pep_flag")] = rng.binomial(1, 0.03, size=n_samples)
+    X[:, FEATURE_NAMES.index("travel_rule_received")] = rng.binomial(1, 0.72, size=n_samples)
+    X[:, FEATURE_NAMES.index("onboarding_age_log")] = np.log1p(rng.integers(1, 4_000, size=n_samples))
+    X[:, FEATURE_NAMES.index("history_total_log")] = np.log1p(rng.integers(0, 2_000, size=n_samples))
+    X[:, FEATURE_NAMES.index("avg_amount")] = avg_amount
+    X[:, FEATURE_NAMES.index("amount_to_avg_ratio")] = amount_ratio
+    X[:, FEATURE_NAMES.index("amount_zscore")] = rng.normal(loc=np.log1p(amount_ratio), scale=0.7, size=n_samples)
+    X[:, FEATURE_NAMES.index("recent_10m_count")] = velocity_10m
+    X[:, FEATURE_NAMES.index("recent_1h_count")] = velocity_1h
+    X[:, FEATURE_NAMES.index("recent_24h_count")] = velocity_1h + rng.poisson(lam=4.0, size=n_samples)
+    X[:, FEATURE_NAMES.index("recent_24h_amount_log")] = np.log1p(amount * rng.uniform(1.0, 5.0, size=n_samples))
+    X[:, FEATURE_NAMES.index("velocity_to_daily_baseline")] = np.maximum(velocity_10m / 0.2, 0.0)
+    X[:, FEATURE_NAMES.index("high_value_24h_count")] = rng.poisson(lam=0.6, size=n_samples)
+    X[:, FEATURE_NAMES.index("near_threshold_24h_count")] = structuring * rng.integers(3, 7, size=n_samples)
+    X[:, FEATURE_NAMES.index("receiver_seen_count")] = (1 - receiver_new) * rng.integers(1, 15, size=n_samples)
+    X[:, FEATURE_NAMES.index("new_receiver_flag")] = receiver_new
+    X[:, FEATURE_NAMES.index("recent_unique_receivers")] = rng.integers(1, 40, size=n_samples)
+    X[:, FEATURE_NAMES.index("seen_device_before")] = rng.binomial(1, 0.78, size=n_samples)
+    X[:, FEATURE_NAMES.index("seen_ip_before")] = rng.binomial(1, 0.84, size=n_samples)
+    X[:, FEATURE_NAMES.index("seen_country_before")] = rng.binomial(1, 0.88, size=n_samples)
+    X[:, FEATURE_NAMES.index("days_since_last_tx")] = rng.exponential(scale=4.0, size=n_samples)
+    X[:, FEATURE_NAMES.index("night_ratio")] = rng.uniform(0.0, 0.35, size=n_samples)
+    X[:, FEATURE_NAMES.index("weekend_ratio")] = rng.uniform(0.0, 0.45, size=n_samples)
+    X[:, FEATURE_NAMES.index("cross_border_ratio")] = rng.uniform(0.0, 0.25, size=n_samples)
 
-    # --- Core numeric features -------------------------------------------
-    amount: np.ndarray = np.clip(
-        rng.lognormal(mean=6.0, sigma=2.5, size=n_samples), 1.0, 1_000_000.0
-    )
-    amount_log: np.ndarray = np.log1p(amount)
-    is_high_amount: np.ndarray = (amount > 50_000.0).astype(int)
-    is_very_high_amount: np.ndarray = (amount > 500_000.0).astype(int)
+    fraud_score = np.full(n_samples, 0.02, dtype=np.float64)
+    fraud_score += X[:, FEATURE_NAMES.index("amount_gt_50k")] * 0.02
+    fraud_score += X[:, FEATURE_NAMES.index("amount_gt_500k")] * 0.10
+    fraud_score += unusual_hour * 0.05
+    fraud_score += receiver_new * 0.04
+    fraud_score += (velocity_10m >= 3).astype(float) * 0.08
+    fraud_score += structuring * 0.12
+    fraud_score += wallet_high * 0.05
+    fraud_score += cross_border * 0.03
+    fraud_score += kyc_high * 0.07
+    fraud_score += same_account * 0.15
+    fraud_score += sanctions * 0.70
+    fraud_score += (amount_ratio >= 3.0).astype(float) * 0.06
+    fraud_score = np.clip(fraud_score, 0.0, 0.995)
+    y = (rng.random(n_samples) < fraud_score).astype(int)
 
-    # --- Time features ---------------------------------------------------
-    hour_of_day: np.ndarray = rng.randint(0, 24, size=n_samples)
-    is_unusual_hour: np.ndarray = (hour_of_day <= 5).astype(int)
-    day_of_week: np.ndarray = rng.randint(0, 7, size=n_samples)
-    is_weekend: np.ndarray = (day_of_week >= 5).astype(int)
-
-    # --- Categorical features --------------------------------------------
-    # 85 % of transactions use low-risk currencies
-    currency_risk: np.ndarray = rng.choice([0, 1], size=n_samples, p=[0.85, 0.15])
-    # Transaction type distribution: 40 % transfer, 30 % payment, 20 % withdrawal, 10 % deposit
-    transaction_type: np.ndarray = rng.choice(
-        [0, 1, 2, 3], size=n_samples, p=[0.40, 0.30, 0.20, 0.10]
-    )
-
-    # --- Account features ------------------------------------------------
-    from_account_hash: np.ndarray = rng.uniform(0.0, 1.0, size=n_samples)
-    to_account_hash: np.ndarray = rng.uniform(0.0, 1.0, size=n_samples)
-    same_account: np.ndarray = (rng.random(n_samples) < 0.01).astype(int)
-
-    # --- Noise features (12-49) ------------------------------------------
-    n_noise: int = 50 - 12  # 38 noise columns
-    noise: np.ndarray = rng.randn(n_samples, n_noise)
-
-    # --- Fraud label generation ------------------------------------------
-    # Base fraud probability for every transaction
-    fraud_prob: np.ndarray = np.full(n_samples, 0.02, dtype=float)
-
-    # Additive risk factors (order matters for readability, not computation)
-    fraud_prob += is_unusual_hour * 0.05          # late-night transactions
-    fraud_prob += is_high_amount * 0.03           # large amounts
-    fraud_prob += is_very_high_amount * 0.15      # extremely large amounts
-    fraud_prob += currency_risk * 0.04            # high-risk currencies
-    fraud_prob += same_account * 0.20             # self-transfer (money-laundering signal)
-    fraud_prob += (transaction_type == 2) * 0.03  # withdrawals slightly riskier
-    fraud_prob += (is_unusual_hour & is_high_amount) * 0.10  # combined pattern
-
-    fraud_prob = np.clip(fraud_prob, 0.0, 1.0)
-    fraud_label: np.ndarray = (rng.random(n_samples) < fraud_prob).astype(int)
-
-    # --- Assemble DataFrame ----------------------------------------------
-    df = pd.DataFrame(
-        {
-            "amount": amount,
-            "amount_log": amount_log,
-            "is_high_amount": is_high_amount,
-            "is_very_high_amount": is_very_high_amount,
-            "hour_of_day": hour_of_day,
-            "is_unusual_hour": is_unusual_hour,
-            "is_weekend": is_weekend,
-            "currency_risk": currency_risk,
-            "transaction_type": transaction_type,
-            "from_account_hash": from_account_hash,
-            "to_account_hash": to_account_hash,
-            "same_account": same_account,
-        }
-    )
-
-    for i in range(n_noise):
-        df[f"feature_{12 + i}"] = noise[:, i]
-
-    df["fraud_label"] = fraud_label
-
-    fraud_count: int = int(fraud_label.sum())
     logger.info(
-        "Synthetic dataset generated: %d samples, %d fraud (%.2f %%)",
+        "Synthetic training dataset generated: samples=%d feature_count=%d fraud_rate=%.4f",
         n_samples,
-        fraud_count,
-        100.0 * fraud_count / n_samples,
+        TOTAL_FEATURES,
+        float(y.mean()),
     )
-    return df
+    return X, y
 
 
-# ---------------------------------------------------------------------------
-# Model training
-# ---------------------------------------------------------------------------
-
-def train_model(df: pd.DataFrame) -> Tuple[RandomForestClassifier, StandardScaler]:
-    """Train a RandomForestClassifier on *df* and persist artifacts.
-
-    Steps
-    -----
-    1. Split features / labels.
-    2. Stratified 80/20 train-test split.
-    3. Fit StandardScaler on training set.
-    4. Train RandomForestClassifier(n_estimators=100, class_weight='balanced').
-    5. Evaluate and print: accuracy, precision, recall, F1, AUC-ROC,
-       and a full classification report.
-    6. Save model and scaler to ARTIFACT_DIR with joblib.
-
-    Returns
-    -------
-    (model, scaler) — both fitted objects.
-    """
+def train_model() -> tuple[RandomForestClassifier, StandardScaler]:
     os.makedirs(ARTIFACT_DIR, exist_ok=True)
 
-    feature_cols = [c for c in df.columns if c != "fraud_label"]
-    X: np.ndarray = df[feature_cols].values
-    y: np.ndarray = df["fraud_label"].values
-
-    logger.info(
-        "Training on %d samples, %d features", X.shape[0], X.shape[1]
-    )
-
+    X, y = generate_synthetic_data()
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
+        X,
+        y,
         test_size=0.20,
-        random_state=_RNG_SEED,
+        random_state=42,
         stratify=y,
     )
 
-    # Scale
-    scaler: StandardScaler = StandardScaler()
-    X_train_scaled: np.ndarray = scaler.fit_transform(X_train)
-    X_test_scaled: np.ndarray = scaler.transform(X_test)
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
-    # Train
-    model: RandomForestClassifier = RandomForestClassifier(
-        n_estimators=100,
+    model = RandomForestClassifier(
+        n_estimators=180,
         max_depth=12,
-        min_samples_leaf=5,
-        class_weight="balanced",
-        random_state=_RNG_SEED,
+        min_samples_leaf=4,
+        class_weight="balanced_subsample",
+        random_state=42,
         n_jobs=-1,
     )
     model.fit(X_train_scaled, y_train)
-    logger.info("RandomForestClassifier training complete")
 
-    # Evaluate
-    y_pred: np.ndarray = model.predict(X_test_scaled)
-    y_proba: np.ndarray = model.predict_proba(X_test_scaled)[:, 1]
+    y_proba = model.predict_proba(X_test_scaled)[:, 1]
+    y_pred = (y_proba >= 0.50).astype(int)
 
-    acc: float = accuracy_score(y_test, y_pred)
-    prec: float = precision_score(y_test, y_pred, zero_division=0)
-    rec: float = recall_score(y_test, y_pred, zero_division=0)
-    f1: float = f1_score(y_test, y_pred, zero_division=0)
-    auc: float = roc_auc_score(y_test, y_proba)
-
+    logger.info("Training complete")
     print()
-    print("=" * 55)
-    print(" Model Training Results")
-    print("=" * 55)
-    print(f"  Accuracy  : {acc:.4f}")
-    print(f"  Precision : {prec:.4f}")
-    print(f"  Recall    : {rec:.4f}")
-    print(f"  F1 Score  : {f1:.4f}")
-    print(f"  AUC-ROC   : {auc:.4f}")
-    print("=" * 55)
-    print()
+    print("=" * 64)
+    print(" Hybrid Fraud Model Metrics")
+    print("=" * 64)
+    print(f" Precision : {precision_score(y_test, y_pred, zero_division=0):.4f}")
+    print(f" Recall    : {recall_score(y_test, y_pred, zero_division=0):.4f}")
+    print(f" F1 Score  : {f1_score(y_test, y_pred, zero_division=0):.4f}")
+    print(f" AUC-ROC   : {roc_auc_score(y_test, y_proba):.4f}")
+    print("=" * 64)
     print(classification_report(y_test, y_pred, target_names=["Legitimate", "Fraud"]))
-    print("=" * 55)
 
-    # Persist artifacts
     joblib.dump(model, MODEL_PATH, compress=3)
     joblib.dump(scaler, SCALER_PATH, compress=3)
+    with open(METADATA_PATH, "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "version": settings.MODEL_VERSION,
+                "trainedAt": datetime.now(timezone.utc).isoformat(),
+                "featureCount": TOTAL_FEATURES,
+                "featureNames": FEATURE_NAMES,
+                "featureSchemaVersion": settings.FEATURE_SCHEMA_VERSION,
+                "algorithm": "RandomForestClassifier",
+            },
+            handle,
+            indent=2,
+        )
 
-    logger.info("Model saved  → %s", MODEL_PATH)
-    logger.info("Scaler saved → %s", SCALER_PATH)
-
+    logger.info("Artifacts saved: model=%s scaler=%s", MODEL_PATH, SCALER_PATH)
     return model, scaler
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
 if __name__ == "__main__":
-    logger.info("Generating synthetic training data (n_samples=10 000)…")
-    df: pd.DataFrame = generate_synthetic_data(n_samples=10_000)
-
-    logger.info("Training fraud-detection model…")
-    train_model(df)
-
-    logger.info("Training pipeline complete.  Artifacts written to: %s", ARTIFACT_DIR)
+    train_model()

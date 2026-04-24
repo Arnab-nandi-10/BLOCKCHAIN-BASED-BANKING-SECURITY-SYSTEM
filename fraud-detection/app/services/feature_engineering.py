@@ -1,162 +1,364 @@
+from __future__ import annotations
+
 import hashlib
 import math
+import re
 from datetime import datetime, timezone
-from typing import List
+from typing import Mapping
 
 import numpy as np
 
+from app.core.config import settings
 from app.models.schemas import FraudScoreRequest
+from app.services.risk_context import HistorySummary, NormalizedTransaction
+from app.services.tenant_runtime_config import TenantRuntimeConfig
 
-# Total feature vector width — must match the training pipeline
-TOTAL_FEATURES: int = 50
+FEATURE_NAMES: list[str] = [
+    "amount",
+    "amount_log",
+    "amount_sqrt",
+    "amount_gt_50k",
+    "amount_gt_500k",
+    "amount_gt_1m",
+    "hour_of_day",
+    "hour_sin",
+    "hour_cos",
+    "weekday",
+    "is_weekend",
+    "is_unusual_hour",
+    "tx_type_transfer",
+    "tx_type_payment",
+    "tx_type_withdrawal",
+    "tx_type_deposit",
+    "currency_low_risk",
+    "currency_high_risk",
+    "network_permissioned",
+    "network_public",
+    "same_account",
+    "cross_border",
+    "from_hash_mod",
+    "to_hash_mod",
+    "account_prefix_match",
+    "from_digit_ratio",
+    "to_digit_ratio",
+    "from_pattern_score",
+    "to_pattern_score",
+    "origin_country_high_risk",
+    "destination_country_high_risk",
+    "kyc_verified",
+    "kyc_risk_low",
+    "kyc_risk_medium",
+    "kyc_risk_high",
+    "receiver_verified",
+    "wallet_risk_low",
+    "wallet_risk_medium",
+    "wallet_risk_high",
+    "sanctions_hit",
+    "pep_flag",
+    "travel_rule_received",
+    "onboarding_age_log",
+    "history_total_log",
+    "avg_amount",
+    "amount_to_avg_ratio",
+    "amount_zscore",
+    "recent_10m_count",
+    "recent_1h_count",
+    "recent_24h_count",
+    "recent_24h_amount_log",
+    "velocity_to_daily_baseline",
+    "high_value_24h_count",
+    "near_threshold_24h_count",
+    "receiver_seen_count",
+    "new_receiver_flag",
+    "recent_unique_receivers",
+    "seen_device_before",
+    "seen_ip_before",
+    "seen_country_before",
+    "days_since_last_tx",
+    "night_ratio",
+    "weekend_ratio",
+    "cross_border_ratio",
+]
+TOTAL_FEATURES = len(FEATURE_NAMES)
 
-# Currencies considered low-risk for currency_risk feature
-_LOW_RISK_CURRENCIES: frozenset = frozenset({"USD", "EUR", "GBP"})
-
-# Mapping of transaction type strings to integer codes
-_TX_TYPE_ENCODING: dict = {
-    "TRANSFER": 0,
-    "PAYMENT": 1,
-    "WITHDRAWAL": 2,
-    "DEPOSIT": 3,
-}
+_ACCOUNT_PREFIX_RE = re.compile(r"[^A-Z0-9]")
+_DIGIT_RE = re.compile(r"\d")
 
 
 class FeatureEngineer:
-    """Converts a FraudScoreRequest into a fixed-length numpy feature vector
-    and derives human-readable fraud rules from the same request."""
+    """Normalise incoming requests and build a 50+ feature vector."""
 
-    # ------------------------------------------------------------------
-    # Feature extraction
-    # ------------------------------------------------------------------
+    def normalize_request(self, request: FraudScoreRequest) -> NormalizedTransaction:
+        metadata = {
+            str(key): str(value)
+            for key, value in (request.metadata or {}).items()
+            if value is not None
+        }
 
-    def extract_features(self, request: FraudScoreRequest) -> np.ndarray:
-        """Return a float64 ndarray of shape (TOTAL_FEATURES,).
-
-        Feature index map
-        -----------------
-        0   amount (raw value)
-        1   amount_log   = log1p(amount)
-        2   is_high_amount        (amount > 50 000)
-        3   is_very_high_amount   (amount > 500 000)
-        4   hour_of_day   (0-23, UTC)
-        5   is_unusual_hour       (hour in 0..5)
-        6   is_weekend            (weekday in 5, 6)
-        7   currency_risk         (0 = USD/EUR/GBP, 1 = other)
-        8   transaction_type_encoded
-        9   fromAccount_hash_mod  (MD5 % 1000 / 1000)
-        10  toAccount_hash_mod    (MD5 % 1000 / 1000)
-        11  same_account          (fromAccount == toAccount)
-        12-49 zeros (future feature slots)
-        """
-        features: List[float] = []
-
-        amount: float = request.amount
-
-        # 0 — amount (raw)
-        features.append(float(amount))
-
-        # 1 — log1p(amount)
-        features.append(math.log1p(amount))
-
-        # 2 — is_high_amount
-        features.append(1.0 if amount > 50_000.0 else 0.0)
-
-        # 3 — is_very_high_amount
-        features.append(1.0 if amount > 500_000.0 else 0.0)
-
-        # 4 — hour_of_day  (simulate using current UTC time)
-        now: datetime = datetime.now(timezone.utc)
-        hour: int = now.hour
-        features.append(float(hour))
-
-        # 5 — is_unusual_hour  (midnight … 5 AM inclusive)
-        features.append(1.0 if 0 <= hour <= 5 else 0.0)
-
-        # 6 — is_weekend  (Saturday=5, Sunday=6)
-        features.append(1.0 if now.weekday() in (5, 6) else 0.0)
-
-        # 7 — currency_risk
-        features.append(
-            0.0 if request.currency.upper() in _LOW_RISK_CURRENCIES else 1.0
+        customer_id = (
+            self._metadata_get(metadata, "customerId")
+            or (request.customer.customerId if request.customer else None)
+            or request.fromAccount
+        )
+        kyc_verified = self._metadata_get_bool(
+            metadata,
+            "kycVerified",
+            default=request.customer.kycVerified if request.customer else True,
+        )
+        kyc_risk_band = (
+            self._metadata_get(metadata, "kycRiskBand")
+            or (request.customer.kycRiskBand if request.customer else "MEDIUM")
+        ).upper()
+        onboarding_age_days = self._metadata_get_int(
+            metadata,
+            "onboardingAgeDays",
+            default=request.customer.onboardingAgeDays if request.customer else 365,
+        )
+        sanctions_hit = self._metadata_get_bool(
+            metadata,
+            "sanctionsHit",
+            default=request.customer.sanctionsHit if request.customer else False,
+        )
+        pep_flag = self._metadata_get_bool(
+            metadata,
+            "pepFlag",
+            default=request.customer.pepFlag if request.customer else False,
+        )
+        receiver_verified = self._metadata_get_bool(
+            metadata,
+            "receiverVerified",
+            default=(
+                request.counterparty.receiverVerified if request.counterparty else False
+            ),
+        )
+        receiver_age_days = self._metadata_get_int(
+            metadata,
+            "receiverAgeDays",
+            default=request.counterparty.receiverAgeDays if request.counterparty else 0,
+        )
+        wallet_risk_level = (
+            self._metadata_get(metadata, "walletRiskLevel")
+            or (request.counterparty.walletRiskLevel if request.counterparty else "LOW")
+        ).upper()
+        channel = (
+            self._metadata_get(metadata, "channel")
+            or (request.channel.channel if request.channel else "API")
+        ).upper()
+        origin_country = (
+            self._metadata_get(metadata, "originCountry")
+            or (request.channel.originCountry if request.channel else "UNKNOWN")
+        ).upper()
+        destination_country = (
+            self._metadata_get(metadata, "destinationCountry")
+            or (request.channel.destinationCountry if request.channel else origin_country)
+        ).upper()
+        blockchain_network = (
+            self._metadata_get(metadata, "blockchainNetwork")
+            or (request.channel.blockchainNetwork if request.channel else "permissioned")
+        )
+        travel_rule_received = self._metadata_get_bool(
+            metadata,
+            "travelRuleReceived",
+            default=request.channel.travelRuleReceived if request.channel else False,
+        )
+        device_id = self._metadata_get(metadata, "deviceId") or (
+            request.channel.deviceId if request.channel else None
         )
 
-        # 8 — transaction_type_encoded
-        features.append(
-            float(_TX_TYPE_ENCODING.get(request.transactionType.upper(), 0))
+        timestamp = request.transactionTimestamp or datetime.now(timezone.utc)
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+        return NormalizedTransaction(
+            transaction_id=request.transactionId,
+            tenant_id=request.tenantId,
+            customer_id=customer_id,
+            from_account=request.fromAccount,
+            to_account=request.toAccount,
+            amount=float(request.amount),
+            currency=request.currency.upper(),
+            transaction_type=request.transactionType.upper(),
+            transaction_timestamp=timestamp.astimezone(timezone.utc),
+            hour_of_day=timestamp.astimezone(timezone.utc).hour,
+            weekday=timestamp.astimezone(timezone.utc).weekday(),
+            is_weekend=timestamp.astimezone(timezone.utc).weekday() >= 5,
+            ip_address=request.ipAddress,
+            device_id=device_id,
+            channel=channel,
+            origin_country=origin_country,
+            destination_country=destination_country,
+            blockchain_network=blockchain_network,
+            wallet_risk_level=wallet_risk_level,
+            kyc_verified=kyc_verified,
+            kyc_risk_band=kyc_risk_band,
+            onboarding_age_days=onboarding_age_days,
+            receiver_verified=receiver_verified,
+            receiver_age_days=receiver_age_days,
+            sanctions_hit=sanctions_hit,
+            pep_flag=pep_flag,
+            travel_rule_received=travel_rule_received,
+            metadata=metadata,
         )
 
-        # 9 — fromAccount hash mod
-        from_hash: int = int(
-            hashlib.md5(request.fromAccount.encode("utf-8"), usedforsecurity=False).hexdigest(),
-            16,
+    def extract_features(
+        self,
+        tx: NormalizedTransaction,
+        history: HistorySummary,
+    ) -> np.ndarray:
+        avg_amount = max(history.avg_amount, 1.0)
+        amount_ratio = tx.amount / avg_amount
+        z_denominator = max(history.amount_stddev, max(history.avg_amount * 0.35, 100.0))
+        amount_zscore = (tx.amount - history.avg_amount) / z_denominator
+        daily_baseline = max(history.avg_daily_transactions, 0.25)
+        velocity_baseline = max(daily_baseline / 144.0, 0.05)
+        velocity_ratio = history.recent_10m_count / velocity_baseline
+        last_gap_days = (
+            max(
+                (tx.transaction_timestamp - history.last_transaction_at).total_seconds()
+                / 86_400.0,
+                0.0,
+            )
+            if history.last_transaction_at
+            else 365.0
         )
-        features.append(float(from_hash % 1000) / 1000.0)
+        runtime_config = TenantRuntimeConfig.from_metadata(tx.metadata)
+        network_lower = tx.blockchain_network.lower()
+        origin_country_high_risk = tx.origin_country in runtime_config.high_risk_countries
+        destination_country_high_risk = tx.destination_country in runtime_config.high_risk_countries
+        currency_low_risk = tx.currency in settings.LOW_RISK_CURRENCY_CODES_SET
+        currency_high_risk = tx.currency in runtime_config.high_risk_currencies
+        same_account = tx.from_account == tx.to_account
+        new_receiver = history.total_transactions > 0 and history.receiver_seen_count == 0
 
-        # 10 — toAccount hash mod
-        to_hash: int = int(
-            hashlib.md5(request.toAccount.encode("utf-8"), usedforsecurity=False).hexdigest(),
-            16,
+        features = np.array(
+            [
+                tx.amount,
+                math.log1p(tx.amount),
+                math.sqrt(tx.amount),
+                1.0 if tx.amount >= 50_000.0 else 0.0,
+                1.0 if tx.amount >= 500_000.0 else 0.0,
+                1.0 if tx.amount >= 1_000_000.0 else 0.0,
+                float(tx.hour_of_day),
+                math.sin((2.0 * math.pi * tx.hour_of_day) / 24.0),
+                math.cos((2.0 * math.pi * tx.hour_of_day) / 24.0),
+                float(tx.weekday),
+                1.0 if tx.is_weekend else 0.0,
+                1.0 if runtime_config.is_unusual_hour(tx.hour_of_day) else 0.0,
+                1.0 if tx.transaction_type == "TRANSFER" else 0.0,
+                1.0 if tx.transaction_type == "PAYMENT" else 0.0,
+                1.0 if tx.transaction_type == "WITHDRAWAL" else 0.0,
+                1.0 if tx.transaction_type == "DEPOSIT" else 0.0,
+                1.0 if currency_low_risk else 0.0,
+                1.0 if currency_high_risk else 0.0,
+                1.0 if any(token in network_lower for token in ("fabric", "permissioned")) else 0.0,
+                1.0 if any(token in network_lower for token in ("ethereum", "bitcoin", "solana", "public")) else 0.0,
+                1.0 if same_account else 0.0,
+                1.0 if tx.origin_country != tx.destination_country else 0.0,
+                self._hash_mod(tx.from_account),
+                self._hash_mod(tx.to_account),
+                1.0 if self._prefix(tx.from_account) == self._prefix(tx.to_account) else 0.0,
+                self._digit_ratio(tx.from_account),
+                self._digit_ratio(tx.to_account),
+                self._account_pattern_score(tx.from_account),
+                self._account_pattern_score(tx.to_account),
+                1.0 if origin_country_high_risk else 0.0,
+                1.0 if destination_country_high_risk else 0.0,
+                1.0 if tx.kyc_verified else 0.0,
+                1.0 if tx.kyc_risk_band == "LOW" else 0.0,
+                1.0 if tx.kyc_risk_band == "MEDIUM" else 0.0,
+                1.0 if tx.kyc_risk_band == "HIGH" else 0.0,
+                1.0 if tx.receiver_verified else 0.0,
+                1.0 if tx.wallet_risk_level == "LOW" else 0.0,
+                1.0 if tx.wallet_risk_level == "MEDIUM" else 0.0,
+                1.0 if tx.wallet_risk_level == "HIGH" else 0.0,
+                1.0 if tx.sanctions_hit else 0.0,
+                1.0 if tx.pep_flag else 0.0,
+                1.0 if tx.travel_rule_received else 0.0,
+                math.log1p(max(tx.onboarding_age_days, 0)),
+                math.log1p(history.total_transactions),
+                history.avg_amount,
+                amount_ratio,
+                amount_zscore,
+                float(history.recent_10m_count),
+                float(history.recent_1h_count),
+                float(history.recent_24h_count),
+                math.log1p(history.recent_24h_total_amount),
+                velocity_ratio,
+                float(history.recent_high_value_24h_count),
+                float(history.near_threshold_24h_count),
+                float(history.receiver_seen_count),
+                1.0 if new_receiver else 0.0,
+                float(history.recent_unique_receivers),
+                1.0 if history.seen_device_before else 0.0,
+                1.0 if history.seen_ip_before else 0.0,
+                1.0 if history.seen_country_before else 0.0,
+                last_gap_days,
+                history.night_ratio,
+                history.weekend_ratio,
+                history.cross_border_ratio,
+            ],
+            dtype=np.float64,
         )
-        features.append(float(to_hash % 1000) / 1000.0)
 
-        # 11 — same_account
-        features.append(1.0 if request.fromAccount == request.toAccount else 0.0)
+        return features
 
-        # 12-49 — pad with zeros to reach TOTAL_FEATURES
-        while len(features) < TOTAL_FEATURES:
-            features.append(0.0)
+    def _metadata_get(self, metadata: Mapping[str, str], key: str) -> str | None:
+        value = metadata.get(key)
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
-        return np.array(features[:TOTAL_FEATURES], dtype=np.float64)
+    def _metadata_get_bool(
+        self,
+        metadata: Mapping[str, str],
+        key: str,
+        *,
+        default: bool,
+    ) -> bool:
+        raw = self._metadata_get(metadata, key)
+        if raw is None:
+            return default
+        return raw.lower() in {"1", "true", "yes", "y", "on"}
 
-    # ------------------------------------------------------------------
-    # Rule derivation
-    # ------------------------------------------------------------------
+    def _metadata_get_int(
+        self,
+        metadata: Mapping[str, str],
+        key: str,
+        *,
+        default: int,
+    ) -> int:
+        raw = self._metadata_get(metadata, key)
+        if raw is None:
+            return default
+        try:
+            return max(int(raw), 0)
+        except ValueError:
+            return default
 
-    def get_triggered_rules(
-        self, request: FraudScoreRequest, score: float
-    ) -> List[str]:
-        """Return a list of human-readable rule names that fire for this request.
+    def _hash_mod(self, value: str) -> float:
+        digest = hashlib.md5(value.encode("utf-8"), usedforsecurity=False).hexdigest()
+        return float(int(digest, 16) % 10_000) / 10_000.0
 
-        Rules are deterministic (based on request fields + current time) so they
-        can be audited independently of the ML model score.
-        """
-        rules: List[str] = []
-        amount: float = request.amount
-        tx_type: str = request.transactionType.upper()
-        now: datetime = datetime.now(timezone.utc)
+    def _prefix(self, value: str) -> str:
+        normalised = _ACCOUNT_PREFIX_RE.sub("", value.upper())
+        return normalised[:4]
 
-        # Amount-based rules
-        if amount > 500_000.0:
-            rules.append("EXTREMELY_HIGH_AMOUNT")
+    def _digit_ratio(self, value: str) -> float:
+        if not value:
+            return 0.0
+        return len(_DIGIT_RE.findall(value)) / len(value)
 
-        if amount > 50_000.0 and tx_type == "TRANSFER":
-            rules.append("LARGE_AMOUNT_TRANSFER")
+    def _account_pattern_score(self, value: str) -> float:
+        if not value:
+            return 0.0
 
-        if amount > 10_000.0 and tx_type == "WITHDRAWAL":
-            rules.append("HIGH_AMOUNT_WITHDRAWAL")
+        compact = _ACCOUNT_PREFIX_RE.sub("", value.upper())
+        if not compact:
+            return 0.0
 
-        # Time-based rules
-        if 0 <= now.hour <= 5:
-            rules.append("UNUSUAL_HOUR_TRANSACTION")
-
-        # Combined high-risk pattern
-        if 0 <= now.hour <= 5 and amount > 50_000.0:
-            rules.append("UNUSUAL_HOUR_HIGH_AMOUNT")
-
-        # Currency risk
-        if request.currency.upper() not in _LOW_RISK_CURRENCIES:
-            rules.append("HIGH_RISK_CURRENCY")
-
-        # Account pattern
-        if request.fromAccount == request.toAccount:
-            rules.append("SUSPICIOUS_ACCOUNT_PATTERN")
-
-        # Score-based rules (appended last so the list stays deterministic for
-        # any given feature set regardless of rule order)
-        if score >= 0.8:
-            rules.append("HIGH_FRAUD_SCORE")
-        elif score >= 0.5:
-            rules.append("ELEVATED_FRAUD_SCORE")
-
-        return rules
+        repeated = max(compact.count(char) for char in set(compact)) / len(compact)
+        sequential_bonus = 0.0
+        if compact in {"0000", "1111", "1234"} or compact.endswith("0000"):
+            sequential_bonus = 0.25
+        return min(1.0, repeated + sequential_bonus)

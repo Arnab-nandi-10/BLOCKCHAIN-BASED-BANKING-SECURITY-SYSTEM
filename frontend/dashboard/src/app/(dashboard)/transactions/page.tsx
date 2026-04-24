@@ -1,18 +1,28 @@
 'use client'
 
 import React, { useState, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Select from '@radix-ui/react-select'
 import {
   Search, X, ExternalLink, Download, ChevronLeft, ChevronRight,
   ChevronDown, Check, Link2, Eye, Loader2, AlertTriangle,
 } from 'lucide-react'
-import { useTransactions } from '@/hooks/use-transactions'
+import { TransactionActions } from '@/components/transactions/transaction-actions'
+import { transactionKeys, useTransactions, useTransactionsByStatus } from '@/hooks/use-transactions'
 import { api } from '@/lib/api-client'
 import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/ui/loading-spinner'
-import { formatCurrency, formatDate, truncate, formatNumber, prettyJson, downloadCsv } from '@/lib/utils'
-import type { Transaction, TransactionStatus, TransactionListParams } from '@/types'
+import { formatCurrency, formatDate, truncate, formatAccountNumber, normalizeFraudScore, fraudScoreColor, formatNumber, prettyJson, downloadCsv } from '@/lib/utils'
+import type {
+  Transaction,
+  TransactionStatus,
+  TransactionListParams,
+  LedgerStatus,
+  VerificationStatus,
+  BlockchainVerificationResult,
+  PageResponse,
+} from '@/types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -37,11 +47,41 @@ function statusVariant(status: TransactionStatus): 'success' | 'danger' | 'warni
   }
 }
 
-function fraudBarColor(score: number): string {
-  if (score >= 0.8) return '#ef4444'
-  if (score >= 0.6) return '#f97316'
-  if (score >= 0.4) return '#f59e0b'
-  return '#10b981'
+// Delegate to shared util — kept for backward compatibility with table cells
+const fraudBarColor = fraudScoreColor
+
+// Display helper used by both the dialog rows array and the table cells
+function acctDisplay(a: string) { return formatAccountNumber(a) }
+
+// Score display helpers — normalises 0-1 or 0-100 scores to a 0-100 percentage
+function scoreWidth(score: number) { return `${normalizeFraudScore(score).toFixed(1)}%` }
+function scorePct(score: number)   { return `${normalizeFraudScore(score).toFixed(1)}%` }
+
+function ledgerStatusVariant(status?: LedgerStatus): 'success' | 'warning' | 'danger' | 'default' {
+  switch (status) {
+    case 'COMMITTED': return 'success'
+    case 'FAILED_LEDGER': return 'danger'
+    case 'PENDING_LEDGER': return 'warning'
+    default: return 'default'
+  }
+}
+
+function ledgerStatusLabel(status?: LedgerStatus): string {
+  switch (status) {
+    case 'COMMITTED': return 'Committed'
+    case 'PENDING_LEDGER':
+    case 'FAILED_LEDGER': return 'Pending'
+    default: return 'Not Requested'
+  }
+}
+
+function verificationVariant(status?: VerificationStatus): 'success' | 'warning' | 'danger' | 'default' {
+  switch (status) {
+    case 'VERIFIED': return 'success'
+    case 'HASH_MISMATCH': return 'danger'
+    case 'UNAVAILABLE': return 'warning'
+    default: return 'default'
+  }
 }
 
 // ─── Shared panel style ────────────────────────────────────────────────────────
@@ -53,31 +93,68 @@ const panelStyle = {
 
 // ─── Transaction Detail Dialog ────────────────────────────────────────────────
 
-function TransactionDetailDialog({ tx, open, onClose }: {
-  tx: Transaction | null; open: boolean; onClose: () => void
+function TransactionDetailDialog({ tx, open, onClose, onVerificationUpdated }: {
+  tx: Transaction | null
+  open: boolean
+  onClose: () => void
+  onVerificationUpdated?: (transactionId: string, status: VerificationStatus) => void
 }) {
+  const transactionId = tx?.transactionId ?? null
+
+  const [verificationResult, setVerificationResult] = useState<BlockchainVerificationResult | null>(null)
+  const [verifyError, setVerifyError] = useState<string | null>(null)
+  const [isVerifying, setIsVerifying] = useState(false)
+
+  React.useEffect(() => {
+    setVerificationResult(null)
+    setVerifyError(null)
+    setIsVerifying(false)
+  }, [transactionId, open])
+
   if (!tx) return null
+
+  const handleVerify = async () => {
+    if (!tx) return
+
+    setIsVerifying(true)
+    setVerifyError(null)
+    try {
+      const result = await api.blockchain.verifyTransaction(tx.transactionId)
+      setVerificationResult(result)
+      onVerificationUpdated?.(tx.transactionId, result.verificationStatus)
+    } catch (error) {
+      setVerifyError((error as Error)?.message ?? 'Unable to verify this ledger record right now.')
+    } finally {
+      setIsVerifying(false)
+    }
+  }
 
   const rows: Array<{ label: string; value: React.ReactNode }> = [
     { label: 'Transaction ID',  value: <span className="font-mono text-[11px]">{tx.transactionId}</span> },
     { label: 'Tenant ID',       value: tx.tenantId },
     { label: 'Type',            value: <Badge variant="info" size="sm">{tx.type}</Badge> },
     { label: 'Status',          value: <Badge variant={statusVariant(tx.status)} size="sm">{tx.status.replace(/_/g, ' ')}</Badge> },
-    { label: 'From Account',    value: <span className="font-mono text-[11px]">{tx.fromAccount}</span> },
-    { label: 'To Account',      value: <span className="font-mono text-[11px]">{tx.toAccount}</span> },
+    { label: 'Ledger Status',   value: <Badge variant={ledgerStatusVariant(tx.ledgerStatus)} size="sm">{ledgerStatusLabel(tx.ledgerStatus)}</Badge> },
+    { label: 'Verification',    value: <Badge variant={verificationVariant(tx.verificationStatus)} size="sm">{tx.verificationStatus ?? 'NOT_VERIFIED'}</Badge> },
+    { label: 'From Account',    value: <span className="font-mono text-[11px]" title={tx.fromAccount}>{formatAccountNumber(tx.fromAccount)}</span> },
+    { label: 'To Account',      value: <span className="font-mono text-[11px]" title={tx.toAccount}>{formatAccountNumber(tx.toAccount)}</span> },
     { label: 'Amount',          value: <span className="font-semibold">{formatCurrency(tx.amount, tx.currency)}</span> },
     { label: 'Currency',        value: tx.currency },
     { label: 'Fraud Score',     value: (
       <div className="flex items-center gap-2">
         <div className="h-1.5 w-28 rounded-full" style={{ background: 'rgba(255,255,255,0.1)' }}>
-          <div className="h-1.5 rounded-full transition-all" style={{ width: `${(tx.fraudScore * 100).toFixed(1)}%`, background: fraudBarColor(tx.fraudScore) }} />
+          <div className="h-1.5 rounded-full transition-all" style={{ width: `${normalizeFraudScore(tx.fraudScore).toFixed(1)}%`, background: fraudScoreColor(tx.fraudScore) }} />
         </div>
-        <span className="font-mono text-[11px]">{(tx.fraudScore * 100).toFixed(1)}%</span>
+        <span className="font-mono text-[11px]">{normalizeFraudScore(tx.fraudScore).toFixed(1)}%</span>
       </div>
     )},
     { label: 'Risk Level',      value: tx.fraudRiskLevel
         ? <Badge variant={tx.fraudRiskLevel === 'CRITICAL' ? 'danger' : tx.fraudRiskLevel === 'HIGH' ? 'warning' : 'default'} size="sm">{tx.fraudRiskLevel}</Badge>
         : '—' },
+    { label: 'Fraud Decision',  value: tx.fraudDecision
+        ? <Badge variant={tx.fraudDecision === 'BLOCK' ? 'danger' : tx.fraudDecision === 'HOLD' ? 'warning' : tx.fraudDecision === 'MONITOR' ? 'info' : 'success'} size="sm">{tx.fraudDecision}</Badge>
+        : '—' },
+    { label: 'Recommendation',  value: tx.fraudRecommendation ?? '—' },
     { label: 'Created At',      value: formatDate(tx.createdAt) },
     { label: 'Completed At',    value: tx.completedAt ? formatDate(tx.completedAt) : '—' },
   ]
@@ -116,7 +193,7 @@ function TransactionDetailDialog({ tx, open, onClose }: {
           <div className="px-6 py-6 space-y-5">
             {/* Main transaction info grid */}
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {rows.slice(0, 8).map(({ label, value }) => (
+              {rows.slice(0, 10).map(({ label, value }) => (
                 <div key={label} className="rounded-xl px-4 py-3.5 transition-all hover:border-blue-500/30" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
                   <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</p>
                   <div className="mt-2 text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>{value}</div>
@@ -133,7 +210,7 @@ function TransactionDetailDialog({ tx, open, onClose }: {
                   <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Fraud Assessment</p>
                 </div>
                 <div className="space-y-3">
-                  {rows.slice(8, 10).map(({ label, value }) => (
+                  {rows.slice(10, 14).map(({ label, value }) => (
                     <div key={label}>
                       <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</p>
                       <div className="mt-1 text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>{value}</div>
@@ -147,15 +224,10 @@ function TransactionDetailDialog({ tx, open, onClose }: {
                 <div className="flex items-center gap-2 mb-4">
                   <Link2 size={14} style={{ color: '#3B82F6' }} />
                   <p className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Blockchain Proof</p>
-                  {tx.blockchainTxId ? (
-                    <span className="ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                      style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', color: '#10b981' }}>
-                      <Check size={10} /> Verified
-                    </span>
-                  ) : (
-                    <span className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-medium"
-                      style={{ background: 'var(--bg-subtle)', color: 'var(--text-muted)' }}>Pending</span>
-                  )}
+                  <div className="ml-auto flex items-center gap-1">
+                    <Badge variant={ledgerStatusVariant(tx.ledgerStatus)} size="sm">{ledgerStatusLabel(tx.ledgerStatus)}</Badge>
+                    <Badge variant={verificationVariant(tx.verificationStatus)} size="sm">{tx.verificationStatus ?? 'NOT_VERIFIED'}</Badge>
+                  </div>
                 </div>
                 <div className="space-y-2.5 text-xs">
                   {[
@@ -168,12 +240,74 @@ function TransactionDetailDialog({ tx, open, onClose }: {
                     </div>
                   ))}
                 </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleVerify}
+                    disabled={isVerifying || tx.ledgerStatus !== 'COMMITTED'}
+                    className="rounded-lg px-3 py-1.5 text-[11px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-40"
+                    style={{ border: '1px solid rgba(59,130,246,0.25)', color: '#2563EB', background: 'rgba(59,130,246,0.08)' }}
+                  >
+                    {isVerifying ? 'Verifying…' : 'Verify Now'}
+                  </button>
+                  {verifyError && (
+                    <span className="text-[11px]" style={{ color: '#DC2626' }}>{verifyError}</span>
+                  )}
+                </div>
+                {verificationResult && (
+                  <div className="mt-4 space-y-2 rounded-xl p-3" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>
+                    <div className="flex items-center gap-2">
+                      <Badge variant={verificationVariant(verificationResult.verificationStatus)} size="sm">
+                        {verificationResult.verificationStatus}
+                      </Badge>
+                      <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                        {verificationResult.verifiedAt ? formatDate(verificationResult.verifiedAt) : 'Just verified'}
+                      </span>
+                    </div>
+                    {[
+                      { k: 'Payload Hash', v: verificationResult.payloadHash ?? '—' },
+                      { k: 'Recomputed Payload', v: verificationResult.recomputedPayloadHash ?? '—' },
+                      { k: 'Record Hash', v: verificationResult.recordHash ?? '—' },
+                      { k: 'Recomputed Record', v: verificationResult.recomputedRecordHash ?? '—' },
+                      { k: 'Previous Hash', v: verificationResult.previousHash ?? '—' },
+                    ].map(({ k, v }) => (
+                      <div key={k} className="flex items-start gap-2 text-[11px]">
+                        <span className="w-28 flex-shrink-0 font-semibold" style={{ color: 'var(--text-muted)' }}>{k}</span>
+                        <span className="font-mono break-all" style={{ color: 'var(--text-secondary)' }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
+            {(tx.triggeredRules?.length || tx.explanations?.length) ? (
+              <div className="rounded-xl p-4" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+                <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Fraud Explainability</p>
+                {tx.triggeredRules?.length ? (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-semibold" style={{ color: 'var(--text-secondary)' }}>Triggered Rules</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {tx.triggeredRules.map((rule) => (
+                        <span key={rule} className="rounded-full px-2.5 py-1 text-[10px]" style={{ background: 'rgba(217,119,6,0.08)', border: '1px solid rgba(217,119,6,0.16)', color: '#B45309' }}>
+                          {rule}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {tx.explanations?.length ? (
+                  <div className="mt-3 space-y-1.5 text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                    {tx.explanations.map((explanation) => (
+                      <p key={explanation}>{explanation}</p>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {/* Timestamps */}
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 pt-2">
-              {rows.slice(10).map(({ label, value }) => (
+              {rows.slice(14).map(({ label, value }) => (
                 <div key={label} className="rounded-xl px-4 py-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
                   <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</p>
                   <div className="mt-1 text-[12px]" style={{ color: 'var(--text-secondary)' }}>{value}</div>
@@ -190,6 +324,7 @@ function TransactionDetailDialog({ tx, open, onClose }: {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function TransactionsPage() {
+  const queryClient = useQueryClient()
   const [page,     setPage]     = useState(0)
   const [search,   setSearch]   = useState('')
   const [status,   setStatus]   = useState('ALL')
@@ -206,19 +341,74 @@ export default function TransactionsPage() {
     ...(search    && { search }),
   }
 
-  const { data, isLoading, isFetching } = useTransactions(params)
+  const selectedStatus = (status === 'ALL' ? 'SUBMITTED' : status) as TransactionStatus
+  const usingStatusEndpoint = status !== 'ALL' && !search && !fromDate && !toDate
+
+  const transactionsListQuery = useTransactions(params, {
+    enabled: !usingStatusEndpoint,
+  })
+
+  const transactionsByStatusQuery = useTransactionsByStatus(
+    selectedStatus,
+    { page, size: 15 },
+    { enabled: usingStatusEndpoint }
+  )
+
+  const data = usingStatusEndpoint ? transactionsByStatusQuery.data : transactionsListQuery.data
+  const isLoading = usingStatusEndpoint ? transactionsByStatusQuery.isLoading : transactionsListQuery.isLoading
+  const isFetching = usingStatusEndpoint ? transactionsByStatusQuery.isFetching : transactionsListQuery.isFetching
+
   const transactions  = data?.content    ?? []
   const totalPages    = data?.totalPages ?? 0
   const totalElements = data?.totalElements ?? 0
 
   const openDetail = useCallback((tx: Transaction) => { setSelectedTx(tx); setDialogOpen(true) }, [])
+  const handleTransactionVerification = useCallback((transactionId: string, status: VerificationStatus) => {
+    setSelectedTx((current) => (
+      current?.transactionId === transactionId
+        ? { ...current, verificationStatus: status }
+        : current
+    ))
+
+    queryClient.setQueryData<Transaction | undefined>(
+      transactionKeys.detail(transactionId),
+      (current) => current ? { ...current, verificationStatus: status } : current
+    )
+
+    queryClient.setQueriesData<PageResponse<Transaction>>(
+      { queryKey: transactionKeys.lists() },
+      (current) => current ? {
+        ...current,
+        content: current.content.map((item) => (
+          item.transactionId === transactionId
+            ? { ...item, verificationStatus: status }
+            : item
+        )),
+      } : current
+    )
+
+    queryClient.setQueriesData<PageResponse<Transaction>>(
+      { queryKey: [...transactionKeys.all, 'status'] },
+      (current) => current ? {
+        ...current,
+        content: current.content.map((item) => (
+          item.transactionId === transactionId
+            ? { ...item, verificationStatus: status }
+            : item
+        )),
+      } : current
+    )
+  }, [queryClient])
 
   const [isExporting, setIsExporting] = useState(false)
 
   const handleExportCsv = async () => {
     setIsExporting(true)
     try {
-      const all = await api.transactions.list({ ...params, page: 0, size: 1000 })
+      const all = usingStatusEndpoint
+        ? await api.transactions.listByStatus(selectedStatus, { page: 0, size: 1000 })
+        : await api.transactions.list({ ...params, page: 0, size: 1000 })
+
       downloadCsv(
         (all.content ?? []).map((t) => ({
           transactionId:  t.transactionId,
@@ -228,6 +418,8 @@ export default function TransactionsPage() {
           currency:       t.currency,
           type:           t.type,
           status:         t.status,
+          ledgerStatus:   t.ledgerStatus ?? '',
+          verificationStatus: t.verificationStatus ?? '',
           fraudScore:     t.fraudScore,
           blockchainTxId: t.blockchainTxId ?? '',
           blockNumber:    t.blockNumber ?? '',
@@ -251,16 +443,22 @@ export default function TransactionsPage() {
           <h2 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Transactions</h2>
           <p className="mt-0.5 text-sm" style={{ color: 'var(--text-muted)' }}>
             {formatNumber(totalElements)} total records
+            <span className="ml-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              &middot; Audit Log may show more entries (each transaction generates multiple events)
+            </span>
           </p>
         </div>
-        <button
-          onClick={handleExportCsv}
-          disabled={isExporting || isLoading}
-          className="btn-secondary flex items-center gap-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          {isExporting ? 'Exporting…' : 'Export CSV'}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <TransactionActions />
+          <button
+            onClick={handleExportCsv}
+            disabled={isExporting || isLoading}
+            className="btn-secondary flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {isExporting ? 'Exporting…' : 'Export CSV'}
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -321,6 +519,14 @@ export default function TransactionsPage() {
         )}
       </div>
 
+      {status !== 'ALL' && (
+        <div className="rounded-xl px-4 py-2.5 text-xs" style={{ background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.2)', color: '#1D4ED8' }}>
+          {usingStatusEndpoint
+            ? `Using direct status endpoint: /api/v1/transactions/status/${selectedStatus}`
+            : 'Status selected, but using the general list endpoint because search/date filters are active.'}
+        </div>
+      )}
+
       {/* Table */}
       <div className="relative rounded-2xl overflow-hidden overflow-x-auto" style={panelStyle}>
         {isFetching && !isLoading && (
@@ -376,18 +582,29 @@ export default function TransactionsPage() {
                     <td>
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-16 flex-shrink-0 rounded-full" style={{ background: 'var(--bg-subtle)' }}>
-                          <div className="h-1.5 rounded-full" style={{ width: `${(tx.fraudScore * 100).toFixed(1)}%`, background: fraudBarColor(tx.fraudScore) }} />
+                          <div className="h-1.5 rounded-full" style={{ width: scoreWidth(tx.fraudScore), background: fraudBarColor(tx.fraudScore) }} />
                         </div>
-                        <span className="text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>{(tx.fraudScore * 100).toFixed(1)}%</span>
+                        <span className="text-[11px] font-mono" style={{ color: 'var(--text-muted)' }}>{scorePct(tx.fraudScore)}</span>
                       </div>
                     </td>
                     <td>
                       {tx.blockchainTxId ? (
-                        <div className="flex items-center gap-1">
-                          <ExternalLink size={10} style={{ color: 'var(--color-primary)' }} className="flex-shrink-0" />
-                          <span className="font-mono text-[11px] cursor-pointer transition-colors" style={{ color: 'var(--color-primary)' }} title={tx.blockchainTxId}>
-                            {truncate(tx.blockchainTxId, 5, 3)}
-                          </span>
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1">
+                            <ExternalLink size={10} style={{ color: 'var(--color-primary)' }} className="flex-shrink-0" />
+                            <span className="font-mono text-[11px] cursor-pointer transition-colors" style={{ color: 'var(--color-primary)' }} title={tx.blockchainTxId}>
+                              {truncate(tx.blockchainTxId, 5, 3)}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            <Badge variant={ledgerStatusVariant(tx.ledgerStatus)} size="sm">{ledgerStatusLabel(tx.ledgerStatus)}</Badge>
+                            <Badge variant={verificationVariant(tx.verificationStatus)} size="sm">{tx.verificationStatus ?? 'NOT_VERIFIED'}</Badge>
+                          </div>
+                        </div>
+                      ) : tx.ledgerStatus ? (
+                        <div className="flex flex-wrap gap-1">
+                          <Badge variant={ledgerStatusVariant(tx.ledgerStatus)} size="sm">{ledgerStatusLabel(tx.ledgerStatus)}</Badge>
+                          <Badge variant={verificationVariant(tx.verificationStatus)} size="sm">{tx.verificationStatus ?? 'NOT_VERIFIED'}</Badge>
                         </div>
                       ) : (
                         <span className="text-[11px]" style={{ color: 'var(--border)' }}>—</span>
@@ -439,7 +656,12 @@ export default function TransactionsPage() {
         </div>
       )}
 
-      <TransactionDetailDialog tx={selectedTx} open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      <TransactionDetailDialog
+        tx={selectedTx}
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onVerificationUpdated={handleTransactionVerification}
+      />
     </div>
   )
 }

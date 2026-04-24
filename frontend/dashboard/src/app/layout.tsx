@@ -4,8 +4,8 @@ import { Providers } from './providers'
 
 export const metadata: Metadata = {
   title: {
-    default: 'BBSS — Blockchain Banking Security',
-    template: '%s | BBSS',
+    default: 'Civic Savings — Blockchain Banking Security',
+    template: '%s | Civic Savings',
   },
   description:
     'Enterprise-grade blockchain-backed banking security platform with real-time fraud detection and immutable audit trails.',

@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the Kafka reliability improvements implemented across the BBSS microservices architecture to ensure fault-tolerant message processing, automatic retry mechanisms, and dead-letter queue handling.
+This document describes the Kafka reliability improvements implemented across the Civic Savings microservices architecture to ensure fault-tolerant message processing, automatic retry mechanisms, and dead-letter queue handling.
 
 ## Architecture
 

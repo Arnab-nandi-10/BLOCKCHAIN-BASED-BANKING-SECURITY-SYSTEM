@@ -66,6 +66,9 @@ public class AuditResponse {
     /** Ledger block number; {@code null} while status is PENDING. */
     private final String blockNumber;
 
+    /** Latest ledger integrity verification outcome when available. */
+    private final String verificationStatus;
+
     /**
      * Current lifecycle status of the audit record.
      *

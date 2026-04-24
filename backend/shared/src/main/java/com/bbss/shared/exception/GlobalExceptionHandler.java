@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * Centralised exception handler for all BBSS REST controllers.
+ * Centralised exception handler for all Civic Savings REST controllers.
  *
  * <p>This advice intercepts exceptions thrown anywhere in the controller or
  * service layer and converts them into standardised {@link ErrorResponse} JSON

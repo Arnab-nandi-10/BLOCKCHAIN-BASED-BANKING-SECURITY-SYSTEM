@@ -3,6 +3,7 @@ package com.bbss.blockchain.messaging;
 import com.bbss.shared.events.AuditEvent;
 import com.bbss.blockchain.service.ChaincodeInvokerService;
 import com.bbss.blockchain.service.FabricGatewayService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -29,11 +30,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 public class AuditEventConsumer {
 
     private final ChaincodeInvokerService chaincodeInvokerService;
+    private final ObjectMapper objectMapper;
 
     /**
      * Consume an {@link AuditEvent} and write it to the Fabric audit chaincode.
      *
-     * @param event          the deserialized audit event
+     * @param eventPayload   the deserialized audit event payload
      * @param partition      Kafka partition (for observability)
      * @param offset         Kafka offset (for observability)
      * @param acknowledgment manual acknowledgment handle
@@ -44,10 +46,12 @@ public class AuditEventConsumer {
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(
-            @Payload AuditEvent event,
+            @Payload Object eventPayload,
             @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
             @Header(KafkaHeaders.OFFSET) long offset,
             Acknowledgment acknowledgment) {
+
+        AuditEvent event = objectMapper.convertValue(eventPayload, AuditEvent.class);
 
         log.info("Received AuditEvent: eventId={} entityType={} action={} partition={} offset={}",
                 event.getEventId(), event.getEntityType(), event.getAction(), partition, offset);

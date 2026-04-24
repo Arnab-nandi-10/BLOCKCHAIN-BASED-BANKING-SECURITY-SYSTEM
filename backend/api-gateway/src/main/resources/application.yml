@@ -53,10 +53,44 @@ resilience4j:
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
         permittedNumberOfCallsInHalfOpenState: 3
+      tenant-service:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+      transaction-service:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+      audit-service:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+      blockchain-service:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+      fraud-detection:
+        slidingWindowSize: 10
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
       default:
         slidingWindowSize: 10
         failureRateThreshold: 50
         waitDurationInOpenState: 10s
+  timelimiter:
+    instances:
+      tenant-service:
+        timeout-duration: 10s
+      transaction-service:
+        timeout-duration: 15s
+      audit-service:
+        timeout-duration: 10s
+      blockchain-service:
+        timeout-duration: 15s
+      fraud-detection:
+        timeout-duration: 10s
+      default:
+        timeout-duration: 10s
 
 logging:
   level:

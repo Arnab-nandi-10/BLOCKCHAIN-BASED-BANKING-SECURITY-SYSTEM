@@ -9,7 +9,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
   Building2, Plus, Eye, EyeOff, RefreshCw, CheckCircle2,
-  Ban, Trash2, X, ChevronDown, Check, ShieldX, Loader2,
+  Ban, Trash2, X, ChevronDown, ChevronRight, Check, ShieldX, Loader2,
   AlertTriangle, Copy,
 } from 'lucide-react'
 import { api } from '@/lib/api-client'
@@ -48,6 +48,7 @@ const createTenantSchema = z.object({
   name:       z.string().min(2, 'Name must be at least 2 characters'),
   adminEmail: z.string().email('Enter a valid email'),
   plan:       z.enum(['STARTER', 'PROFESSIONAL', 'ENTERPRISE']),
+  webhookUrl: z.string().trim().url('Enter a valid webhook URL').or(z.literal('')),
 })
 
 type CreateTenantForm = z.infer<typeof createTenantSchema>
@@ -72,7 +73,7 @@ function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: () => v
   const { register, handleSubmit, reset, setValue, watch, formState: { errors, isSubmitting } } =
     useForm<CreateTenantForm>({
       resolver: zodResolver(createTenantSchema),
-      defaultValues: { name: '', adminEmail: '', plan: 'STARTER' },
+      defaultValues: { name: '', adminEmail: '', plan: 'STARTER', webhookUrl: '' },
     })
 
   const selectedPlan = watch('plan')
@@ -97,7 +98,16 @@ function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: () => v
             </Dialog.Close>
           </div>
 
-          <form onSubmit={handleSubmit((d) => { setServerError(null); createMutation.mutate(d) })} className="px-6 py-5 space-y-4">
+          <form onSubmit={handleSubmit((d) => {
+            setServerError(null)
+            const webhookUrl = d.webhookUrl.trim()
+            createMutation.mutate({
+              name: d.name,
+              adminEmail: d.adminEmail,
+              plan: d.plan,
+              ...(webhookUrl ? { webhookUrl } : {}),
+            })
+          })} className="px-6 py-5 space-y-4">
             {serverError && (
               <div className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5' }}>
                 <AlertTriangle size={13} /> {serverError}
@@ -114,6 +124,17 @@ function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: () => v
                 {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
               </div>
             ))}
+
+            <div>
+              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Webhook URL</label>
+              <input
+                type="url"
+                placeholder="https://example.com/webhooks/bbss"
+                className="input-base"
+                {...register('webhookUrl')}
+              />
+              {errors.webhookUrl && <p className="mt-1 text-xs text-red-400">{errors.webhookUrl.message}</p>}
+            </div>
 
             <div>
               <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Plan</label>
@@ -157,9 +178,143 @@ function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: () => v
   )
 }
 
+function parseTenantConfigJson(raw: string): Record<string, string> {
+  const trimmed = raw.trim()
+  if (!trimmed) return {}
+
+  const parsed = JSON.parse(trimmed)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Configuration must be a JSON object.')
+  }
+
+  return Object.fromEntries(
+    Object.entries(parsed as Record<string, unknown>).map(([key, value]) => [
+      key,
+      typeof value === 'string' ? value : JSON.stringify(value),
+    ])
+  )
+}
+
+function TenantConfigDialog({
+  tenant,
+  open,
+  onClose,
+}: {
+  tenant: Tenant | null
+  open: boolean
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const [configText, setConfigText] = useState('{}')
+  const [serverError, setServerError] = useState<string | null>(null)
+
+  const updateMutation = useMutation({
+    mutationFn: (config: Record<string, string>) => {
+      if (!tenant) throw new Error('No tenant selected')
+      return api.tenants.updateConfig(tenant.tenantId, config)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: tenantKeys.all })
+      onClose()
+    },
+    onError: (err: unknown) => {
+      setServerError((err as { response?: { data?: { message?: string } }})?.response?.data?.message ?? 'Failed to update tenant configuration.')
+    },
+  })
+
+  React.useEffect(() => {
+    if (!open || !tenant) return
+    setConfigText(JSON.stringify(tenant.config ?? {}, null, 2))
+    setServerError(null)
+  }, [open, tenant])
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!tenant) return
+
+    try {
+      const parsed = parseTenantConfigJson(configText)
+      setServerError(null)
+      updateMutation.mutate(parsed)
+    } catch (error) {
+      setServerError((error as Error).message ?? 'Configuration must be valid JSON.')
+    }
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={(v) => !v && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/75 backdrop-blur-md" />
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-2xl -translate-x-1/2 -translate-y-1/2 rounded-2xl shadow-2xl outline-none animate-slide-up" style={dialogStyle}>
+          <div className="flex items-center justify-between px-6 py-5" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div>
+              <Dialog.Title className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>Tenant Configuration</Dialog.Title>
+              <Dialog.Description className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>
+                Update the backend config map for this tenant.
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <button className="rounded-lg p-1.5 transition-colors hover:bg-[var(--bg-subtle)]" style={{ color: 'var(--text-muted)' }}><X size={16} /></button>
+            </Dialog.Close>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
+            {tenant && (
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="rounded-xl px-4 py-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+                  <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Monthly limit</p>
+                  <p className="mt-1 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{formatNumber(tenant.monthlyTransactionLimit)}</p>
+                </div>
+                <div className="rounded-xl px-4 py-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+                  <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Max users</p>
+                  <p className="mt-1 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{formatNumber(tenant.maxUsers)}</p>
+                </div>
+                <div className="rounded-xl px-4 py-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
+                  <p className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Webhook URL</p>
+                  <p className="mt-1 truncate text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{tenant.webhookUrl ?? '—'}</p>
+                </div>
+              </div>
+            )}
+
+            {serverError && (
+              <div className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5' }}>
+                <AlertTriangle size={13} /> {serverError}
+              </div>
+            )}
+
+            <div>
+              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>Config JSON</label>
+              <textarea
+                value={configText}
+                onChange={(event) => setConfigText(event.target.value)}
+                className="input-base min-h-[240px] font-mono text-[12px]"
+                placeholder='{"fraudLimit":"7500","dailyProcessingWindow":"04:00-16:00"}'
+              />
+              <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+                Values are stored as strings; nested objects will be stringified.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-1">
+              <Dialog.Close asChild>
+                <button type="button" className="btn-secondary px-4 py-2 text-sm" disabled={updateMutation.isPending}>Cancel</button>
+              </Dialog.Close>
+              <button type="submit" disabled={updateMutation.isPending}
+                className="btn-primary px-4 py-2 text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed">
+                {updateMutation.isPending && <Loader2 size={13} className="animate-spin" />}
+                Save Configuration
+              </button>
+            </div>
+          </form>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
 // ─── Tenant Card ───────────────────────────────────────────────────────────────
 
-function TenantCard({ tenant }: { tenant: Tenant }) {
+function TenantCard({ tenant, onConfigure }: { tenant: Tenant; onConfigure: () => void }) {
   const qc = useQueryClient()
   const [showApiKey, setShowApiKey] = useState(false)
   const [copied,     setCopied]     = useState(false)
@@ -211,6 +366,16 @@ function TenantCard({ tenant }: { tenant: Tenant }) {
           <p style={{ color: 'var(--text-muted)' }}>Created</p>
           <p className="mt-0.5" style={{ color: 'var(--text-secondary)' }}>{formatDate(tenant.createdAt, 'MMM dd, yyyy')}</p>
         </div>
+        <div>
+          <p style={{ color: 'var(--text-muted)' }}>Webhook URL</p>
+          <p className="truncate mt-0.5" style={{ color: 'var(--text-secondary)' }}>{tenant.webhookUrl ?? '—'}</p>
+        </div>
+        <div>
+          <p style={{ color: 'var(--text-muted)' }}>Plan Limits</p>
+          <p className="mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+            {formatNumber(tenant.monthlyTransactionLimit)} tx / {formatNumber(tenant.maxUsers)} users
+          </p>
+        </div>
       </div>
 
       <div className="rounded-xl p-3" style={{ background: 'var(--bg-subtle)', border: '1px solid var(--border)' }}>
@@ -257,6 +422,11 @@ function TenantCard({ tenant }: { tenant: Tenant }) {
           style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', color: '#a5b4fc' }}>
           {regenMut.isPending ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />} Regen Key
         </button>
+        <button onClick={onConfigure} disabled={isBusy}
+          className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] transition-colors disabled:opacity-50"
+          style={{ background: 'rgba(14,165,233,0.08)', border: '1px solid rgba(14,165,233,0.2)', color: '#67e8f9' }}>
+          <ChevronRight size={10} /> Config
+        </button>
         {tenant.status !== 'DELETED' && (
           <button onClick={() => { if (window.confirm(`Delete "${tenant.name}"? This cannot be undone.`)) deleteMut.mutate() }}
             disabled={isBusy}
@@ -275,6 +445,7 @@ function TenantCard({ tenant }: { tenant: Tenant }) {
 export default function TenantsPage() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [configTenant, setConfigTenant] = useState<Tenant | null>(null)
   const [page,         setPage]         = useState(0)
   const [statusFilter, setStatusFilter] = useState('ALL')
 
@@ -393,7 +564,13 @@ export default function TenantsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {tenants.map((tenant) => <TenantCard key={tenant.tenantId} tenant={tenant} />)}
+          {tenants.map((tenant) => (
+            <TenantCard
+              key={tenant.tenantId}
+              tenant={tenant}
+              onConfigure={() => setConfigTenant(tenant)}
+            />
+          ))}
         </div>
       )}
 
@@ -414,6 +591,11 @@ export default function TenantsPage() {
       )}
 
       <CreateTenantDialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} />
+      <TenantConfigDialog
+        tenant={configTenant}
+        open={Boolean(configTenant)}
+        onClose={() => setConfigTenant(null)}
+      />
     </div>
   )
 }

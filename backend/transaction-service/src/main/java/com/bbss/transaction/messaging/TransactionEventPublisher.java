@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
  * <p>Topics used:
  * <ul>
  *   <li>{@code tx.submitted}   — emitted when a transaction is first persisted</li>
+ *   <li>{@code tx.ledger.commit.request} — emitted after the fraud decision so blockchain-service can anchor it asynchronously</li>
  *   <li>{@code tx.verified}    — emitted after successful blockchain submission</li>
  *   <li>{@code tx.blocked}     — emitted when fraud engine blocks a transaction</li>
  *   <li>{@code fraud.alert}    — emitted when a transaction is placed on FRAUD_HOLD</li>
@@ -32,6 +33,7 @@ import java.util.concurrent.CompletableFuture;
 public class TransactionEventPublisher {
 
     private static final String TOPIC_TX_SUBMITTED = "tx.submitted";
+    private static final String TOPIC_TX_LEDGER_COMMIT_REQUEST = "tx.ledger.commit.request";
     private static final String TOPIC_TX_VERIFIED  = "tx.verified";
     private static final String TOPIC_TX_BLOCKED   = "tx.blocked";
     private static final String TOPIC_FRAUD_ALERT  = "fraud.alert";
@@ -62,6 +64,17 @@ public class TransactionEventPublisher {
         TransactionEvent event = buildTransactionEvent(tx);
         sendAsync(TOPIC_TX_VERIFIED, tx.getTransactionId(), event);
         log.debug("Published TransactionEvent[VERIFIED] for txId={}", tx.getTransactionId());
+    }
+
+    /**
+     * Publish a request for blockchain-service to anchor the post-fraud decision.
+     *
+     * @param tx the transaction whose fraud outcome must be written to Fabric
+     */
+    public void publishLedgerCommitRequested(Transaction tx) {
+        TransactionEvent event = buildTransactionEvent(tx);
+        sendAsync(TOPIC_TX_LEDGER_COMMIT_REQUEST, tx.getTransactionId(), event);
+        log.debug("Published TransactionEvent[LEDGER_COMMIT_REQUEST] for txId={}", tx.getTransactionId());
     }
 
     /**
@@ -111,8 +124,24 @@ public class TransactionEventPublisher {
                 .toAccount(tx.getToAccount())
                 .amount(tx.getAmount())
                 .currency(tx.getCurrency())
+                .transactionType(tx.getType() != null ? tx.getType().name() : null)
                 .status(tx.getStatus() != null ? tx.getStatus().name() : null)
+                .ledgerStatus(tx.getLedgerStatus() != null ? tx.getLedgerStatus().name() : null)
+                .verificationStatus(tx.getVerificationStatus() != null ? tx.getVerificationStatus().name() : null)
+                .fraudScore(tx.getFraudScore())
+                .riskLevel(tx.getFraudRiskLevel())
+                .decision(tx.getFraudDecision())
+                .recommendation(tx.getFraudRecommendation())
+                .reviewRequired(tx.isReviewRequired())
+                .triggeredRules(tx.getTriggeredRules())
+                .explanations(tx.getExplanations())
+                .blockchainTxId(tx.getBlockchainTxId())
+                .blockNumber(tx.getBlockNumber())
                 .timestamp(LocalDateTime.now())
+                .transactionTimestamp(tx.getCreatedAt())
+                .ipAddress(tx.getIpAddress())
+                .metadata(tx.getMetadata())
+                .correlationId(tx.getCorrelationId())
                 .build();
     }
 

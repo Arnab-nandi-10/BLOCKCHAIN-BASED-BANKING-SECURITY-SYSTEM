@@ -4,6 +4,7 @@ import com.bbss.audit.domain.model.AuditEntry;
 import com.bbss.audit.domain.model.AuditStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -23,7 +24,7 @@ import java.util.UUID;
  * by the internal retry scheduler and run in a privileged system context.
  */
 @Repository
-public interface AuditRepository extends JpaRepository<AuditEntry, UUID> {
+public interface AuditRepository extends JpaRepository<AuditEntry, UUID>, JpaSpecificationExecutor<AuditEntry> {
 
     // ── Single-record lookups ─────────────────────────────────────────────────
 

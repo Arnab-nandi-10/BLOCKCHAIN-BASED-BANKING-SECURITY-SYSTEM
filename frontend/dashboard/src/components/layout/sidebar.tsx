@@ -58,7 +58,7 @@ export function Sidebar({ className }: SidebarProps) {
         </div>
         <div>
           <h1 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-            BBSS
+            Civic Savings
           </h1>
           <p className="text-[10px] text-slate-500 dark:text-slate-400">
             Security Platform
@@ -96,7 +96,7 @@ export function Sidebar({ className }: SidebarProps) {
               Admin User
             </p>
             <p className="truncate text-xs text-slate-500 dark:text-slate-400">
-              admin@bbss.io
+              admin@civicsavings.io
             </p>
           </div>
         </div>
