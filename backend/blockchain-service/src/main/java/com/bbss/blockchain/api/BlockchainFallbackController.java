@@ -1,24 +1,15 @@
 package com.bbss.blockchain.api;
 
-import com.bbss.blockchain.domain.model.BlockchainRecord;
-import com.bbss.blockchain.domain.model.SimulatedAuditRecord;
-import com.bbss.blockchain.domain.repository.BlockchainRecordRepository;
-import com.bbss.blockchain.domain.repository.SimulatedAuditRecordRepository;
-import com.bbss.blockchain.dto.BlockchainAuditRequest;
-import com.bbss.blockchain.dto.BlockchainAuditResponse;
-import com.bbss.blockchain.dto.BlockchainSubmitRequest;
-import com.bbss.blockchain.dto.BlockchainSubmitResponse;
-import com.bbss.blockchain.dto.BlockchainTransactionResponse;
-import com.bbss.blockchain.dto.BlockchainVerificationResponse;
-import com.bbss.blockchain.messaging.BlockchainEventPublisher;
-import com.bbss.shared.dto.ApiResponse;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -35,15 +26,26 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.util.HexFormat;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.UUID;
+import com.bbss.blockchain.domain.model.BlockchainRecord;
+import com.bbss.blockchain.domain.model.SimulatedAuditRecord;
+import com.bbss.blockchain.domain.repository.BlockchainRecordRepository;
+import com.bbss.blockchain.domain.repository.SimulatedAuditRecordRepository;
+import com.bbss.blockchain.dto.BlockchainAuditRequest;
+import com.bbss.blockchain.dto.BlockchainAuditResponse;
+import com.bbss.blockchain.dto.BlockchainSubmitRequest;
+import com.bbss.blockchain.dto.BlockchainSubmitResponse;
+import com.bbss.blockchain.dto.BlockchainTransactionResponse;
+import com.bbss.blockchain.dto.BlockchainVerificationResponse;
+import com.bbss.blockchain.messaging.BlockchainEventPublisher;
+import com.bbss.shared.dto.ApiResponse;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Fallback REST controller that is active when {@code fabric.enabled=false}.

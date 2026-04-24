@@ -1,21 +1,21 @@
 package com.bbss.transaction.messaging;
 
-import com.bbss.shared.events.FraudAlertEvent;
-import com.bbss.transaction.domain.model.Transaction;
-import com.bbss.transaction.domain.model.TransactionStatus;
-import com.bbss.transaction.domain.repository.TransactionRepository;
-import org.junit.jupiter.api.Test;
-import org.springframework.kafka.support.Acknowledgment;
-
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import org.junit.jupiter.api.Test;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import org.springframework.kafka.support.Acknowledgment;
+
+import com.bbss.shared.events.FraudAlertEvent;
+import com.bbss.transaction.domain.model.Transaction;
+import com.bbss.transaction.domain.model.TransactionStatus;
+import com.bbss.transaction.domain.repository.TransactionRepository;
 
 class FraudResultConsumerTest {
 

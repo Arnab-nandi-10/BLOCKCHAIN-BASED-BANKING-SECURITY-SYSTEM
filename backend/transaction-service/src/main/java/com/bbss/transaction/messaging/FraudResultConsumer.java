@@ -1,11 +1,7 @@
 package com.bbss.transaction.messaging;
 
-import com.bbss.shared.events.FraudAlertEvent;
-import com.bbss.transaction.domain.model.Transaction;
-import com.bbss.transaction.domain.model.TransactionStatus;
-import com.bbss.transaction.domain.repository.TransactionRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.util.Locale;
+
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
@@ -14,7 +10,13 @@ import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Locale;
+import com.bbss.shared.events.FraudAlertEvent;
+import com.bbss.transaction.domain.model.Transaction;
+import com.bbss.transaction.domain.model.TransactionStatus;
+import com.bbss.transaction.domain.repository.TransactionRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Consumes {@link FraudAlertEvent} messages from the {@code fraud.alert} Kafka topic.
