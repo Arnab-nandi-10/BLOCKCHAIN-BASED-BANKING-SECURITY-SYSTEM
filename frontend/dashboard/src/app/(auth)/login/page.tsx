@@ -21,6 +21,7 @@ import {
 import { api } from '@/lib/api-client'
 import { useAuthStore } from '@/store/auth-store'
 import { cn } from '@/lib/utils'
+import { APP_NAME, APP_SUBTITLE, formatAppVersion } from '@/lib/app-config'
 
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 
@@ -121,8 +122,8 @@ export default function LoginPage() {
             <ShieldCheck size={24} className="text-white" />
           </div>
           <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Civic Savings</h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>Blockchain Banking Security System</p>
+          <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>{APP_NAME}</h1>
+          <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>{APP_SUBTITLE}</p>
           </div>
         </div>
 
@@ -212,7 +213,7 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-5 text-center text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          Civic Savings v1.0 — Enterprise Security Platform
+          {APP_NAME} {formatAppVersion()} — Enterprise Security Platform
         </p>
       </div>
     </div>

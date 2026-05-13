@@ -11,6 +11,7 @@ import { api } from '@/lib/api-client'
 import { useAuthStore } from '@/store/auth-store'
 import { useBlockchainServiceHealth, useFabricHealth } from '@/hooks/use-blockchain'
 import { Badge } from '@/components/ui/badge'
+import { APP_NAME, APP_SUBTITLE, formatAppVersion } from '@/lib/app-config'
 
 function BlockchainHealthPanel() {
   const { data: serviceHealth, isFetching: isServiceFetching, isError: isServiceError, refetch: refetchService, dataUpdatedAt: serviceUpdatedAt } = useBlockchainServiceHealth()
@@ -330,8 +331,8 @@ export default function SettingsPage() {
 
       {/* Version */}
       <div className="space-y-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-        <p>Civic Savings Dashboard v1.0.0</p>
-        <p>Blockchain Banking Security System</p>
+        <p>{APP_NAME} Dashboard {formatAppVersion()}</p>
+        <p>{APP_SUBTITLE}</p>
         <p>Next.js 14 · React 18 · TypeScript 5</p>
       </div>
     </div>

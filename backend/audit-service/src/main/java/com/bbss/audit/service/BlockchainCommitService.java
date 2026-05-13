@@ -3,6 +3,7 @@ package com.bbss.audit.service;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Objects;
 
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Async;
@@ -63,7 +64,8 @@ public class BlockchainCommitService {
     @Async("auditBlockchainExecutor")
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void commitToBlockchainAsync(UUID entryId) {
-        AuditEntry entry = auditRepository.findById(entryId).orElse(null);
+        UUID nonNullEntryId = Objects.requireNonNull(entryId, "entryId must not be null");
+        AuditEntry entry = auditRepository.findById(nonNullEntryId).orElse(null);
         if (entry == null) {
             log.warn("BlockchainCommitService: AuditEntry not found for id={}", entryId);
             return;
@@ -131,9 +133,10 @@ public class BlockchainCommitService {
      */
     private void publishAuditEvent(AuditEntry entry) {
         try {
+            String tenantId = Objects.requireNonNull(entry.getTenantId(), "audit entry tenantId must not be null");
             Map<String, Object> payload = new HashMap<>();
             payload.put("auditId",         entry.getAuditId());
-            payload.put("tenantId",        entry.getTenantId());
+            payload.put("tenantId",        tenantId);
             payload.put("entityType",      entry.getEntityType());
             payload.put("entityId",        entry.getEntityId());
             payload.put("action",          entry.getAction());
@@ -145,7 +148,7 @@ public class BlockchainCommitService {
             payload.put("occurredAt",      entry.getOccurredAt() != null ? entry.getOccurredAt().toString() : "");
             payload.put("correlationId",   entry.getCorrelationId() != null ? entry.getCorrelationId() : "");
 
-            kafkaTemplate.send(AUDIT_EVENTS_TOPIC, entry.getTenantId(), payload);
+            kafkaTemplate.send(AUDIT_EVENTS_TOPIC, tenantId, payload);
             log.debug("Published audit.committed event for auditId={}", entry.getAuditId());
 
         } catch (Exception e) {

@@ -194,7 +194,7 @@ create_and_join_channel() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
-    log_section "Civic Savings Blockchain Banking Security System — Network Bootstrap"
+    log_section "Civic Savings — Network Bootstrap"
 
     check_prerequisites
     clean_previous_artifacts

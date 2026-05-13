@@ -62,7 +62,7 @@ export default function OverviewPage() {
             Overview
           </h1>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Real-time blockchain banking security metrics
+            Real-time Civic Savings metrics
           </p>
         </div>
         

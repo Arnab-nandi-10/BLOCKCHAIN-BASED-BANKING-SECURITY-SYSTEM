@@ -8,12 +8,14 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.FieldError;
+import org.springframework.validation.ObjectError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -147,6 +149,7 @@ public class GlobalExceptionHandler {
      * @return 400 response with a list of field-level error descriptions
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)
+        @SuppressWarnings("null")
     public ResponseEntity<ErrorResponse> handleValidationErrors(
             MethodArgumentNotValidException ex,
             HttpServletRequest request) {
@@ -155,10 +158,15 @@ public class GlobalExceptionHandler {
                 .getAllErrors()
                 .stream()
                 .map(error -> {
-                    if (error instanceof FieldError fe) {
+                                        ObjectError validationError = Objects.requireNonNull(error, "validation error must not be null");
+                                        if (validationError instanceof FieldError fe) {
                         return fe.getField() + ": " + fe.getDefaultMessage();
                     }
-                    return error.getObjectName() + ": " + error.getDefaultMessage();
+                                        String objectName = validationError.getObjectName();
+                                        String defaultMessage = validationError.getDefaultMessage();
+                                        return (objectName != null ? objectName : "validation error")
+                                                        + ": "
+                                                        + (defaultMessage != null ? defaultMessage : "Invalid value");
                 })
                 .sorted()
                 .collect(Collectors.toList());

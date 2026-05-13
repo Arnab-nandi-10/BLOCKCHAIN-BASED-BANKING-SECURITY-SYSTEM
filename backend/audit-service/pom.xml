@@ -28,7 +28,6 @@
         <dependency>
             <groupId>com.bbss</groupId>
             <artifactId>shared</artifactId>
-            <version>1.0.0-SNAPSHOT</version>
         </dependency>
 
         <!-- ── Spring Boot starters ─────────────────────────────── -->
@@ -128,14 +127,12 @@
         <dependency>
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
-            <version>1.5.5.Final</version>
         </dependency>
 
         <!-- ── API documentation ─────────────────────────────────── -->
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.3.0</version>
         </dependency>
 
         <!-- ── Testing ───────────────────────────────────────────── -->

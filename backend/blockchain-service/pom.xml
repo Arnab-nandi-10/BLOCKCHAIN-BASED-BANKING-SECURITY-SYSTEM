@@ -13,7 +13,7 @@
 
     <artifactId>blockchain-service</artifactId>
     <name>blockchain-service</name>
-    <description>Blockchain Service for Hyperledger Fabric integration in Blockchain Banking Security System</description>
+    <description>Blockchain Service for Hyperledger Fabric integration in Civic Savings</description>
 
     <properties>
         <java.version>21</java.version>
@@ -104,7 +104,6 @@
         <dependency>
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
-            <version>1.5.5.Final</version>
         </dependency>
         <dependency>
             <groupId>org.mapstruct</groupId>
@@ -117,7 +116,6 @@
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.3.0</version>
         </dependency>
 
         <!-- Spring Boot Actuator -->

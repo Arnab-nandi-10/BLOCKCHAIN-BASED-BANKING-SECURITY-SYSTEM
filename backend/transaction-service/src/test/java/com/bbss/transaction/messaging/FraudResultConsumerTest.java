@@ -6,7 +6,6 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.Test;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -17,6 +16,7 @@ import com.bbss.transaction.domain.model.Transaction;
 import com.bbss.transaction.domain.model.TransactionStatus;
 import com.bbss.transaction.domain.repository.TransactionRepository;
 
+@SuppressWarnings("null")
 class FraudResultConsumerTest {
 
     @Test
@@ -24,7 +24,7 @@ class FraudResultConsumerTest {
         TransactionRepository repository = mock(TransactionRepository.class);
         Transaction tx = baseTransaction();
         when(repository.findByTransactionId("tx-123")).thenReturn(Optional.of(tx));
-        when(repository.save(any(Transaction.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.save(tx)).thenReturn(tx);
 
         FraudResultConsumer consumer = new FraudResultConsumer(repository);
         Acknowledgment acknowledgment = mock(Acknowledgment.class);
@@ -52,7 +52,7 @@ class FraudResultConsumerTest {
         TransactionRepository repository = mock(TransactionRepository.class);
         Transaction tx = baseTransaction();
         when(repository.findByTransactionId("tx-456")).thenReturn(Optional.of(tx));
-        when(repository.save(any(Transaction.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(repository.save(tx)).thenReturn(tx);
 
         FraudResultConsumer consumer = new FraudResultConsumer(repository);
         Acknowledgment acknowledgment = mock(Acknowledgment.class);

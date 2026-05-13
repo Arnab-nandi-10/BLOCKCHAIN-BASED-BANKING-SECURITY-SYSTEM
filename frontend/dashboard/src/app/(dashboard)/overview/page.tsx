@@ -174,7 +174,7 @@ export default function OverviewPage() {
             System Overview
           </h2>
           <p className="mt-0.5 text-sm" style={{ color: 'var(--text-muted)' }}>
-            Real-time blockchain banking security metrics
+            Real-time Civic Savings metrics
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium"

@@ -122,7 +122,7 @@ remove_generated_artifacts() {
 # Main
 # ---------------------------------------------------------------------------
 main() {
-    log_section "Civic Savings Blockchain Banking Security System — Network Teardown"
+    log_section "Civic Savings — Network Teardown"
 
     stop_docker_services
     remove_chaincode_images

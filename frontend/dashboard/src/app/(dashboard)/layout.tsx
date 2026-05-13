@@ -20,6 +20,7 @@ import {
 import { useAuthStore, selectIsSuperAdmin } from '@/store/auth-store'
 import { api } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
+import { APP_NAME, formatAppVersion } from '@/lib/app-config'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
 
 // â”€â”€â”€ Nav items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -113,7 +114,7 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
               <ShieldCheck size={17} className="text-white" />
             </div>
             <div>
-              <p className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Civic Savings</p>
+              <p className="text-sm font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>{APP_NAME}</p>
               <p className="text-[10px] leading-tight" style={{ color: 'var(--text-muted)' }}>Security Platform</p>
             </div>
           </div>
@@ -146,7 +147,7 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
         <div className="px-5 py-3" style={{ borderTop: '1px solid var(--sidebar-border)' }}>
           <div className="flex items-center gap-2">
             <div className="dot-live" />
-            <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>v1.0.0 · Blockchain Secured</p>
+            <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{formatAppVersion()} · Live ledger status</p>
           </div>
         </div>
       </aside>

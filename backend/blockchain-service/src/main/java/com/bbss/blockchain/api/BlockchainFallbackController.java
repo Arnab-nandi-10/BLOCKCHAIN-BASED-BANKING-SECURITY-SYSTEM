@@ -2,14 +2,17 @@ package com.bbss.blockchain.api;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -504,7 +507,7 @@ public class BlockchainFallbackController {
     private JsonNode parseJson(String json) {
         try {
             return objectMapper.readTree(defaultString(json, "{}"));
-        } catch (Exception ex) {
+        } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Failed to parse simulated blockchain JSON", ex);
         }
     }
@@ -519,7 +522,7 @@ public class BlockchainFallbackController {
         if (value instanceof String raw) {
             try {
                 return objectMapper.readTree(raw);
-            } catch (Exception ignored) {
+            } catch (JsonProcessingException ignored) {
                 Map<String, Object> wrapper = new LinkedHashMap<>();
                 wrapper.put("raw", raw);
                 return objectMapper.valueToTree(wrapper);
@@ -531,7 +534,7 @@ public class BlockchainFallbackController {
     private String canonicalJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
-        } catch (Exception ex) {
+        } catch (JsonProcessingException ex) {
             throw new IllegalStateException("Failed to canonicalise simulated blockchain JSON", ex);
         }
     }
@@ -549,7 +552,7 @@ public class BlockchainFallbackController {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(defaultString(input, "").getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(hash);
-        } catch (Exception ex) {
+        } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("Failed to calculate SHA-256 hash", ex);
         }
     }
@@ -563,21 +566,21 @@ public class BlockchainFallbackController {
             return null;
         }
         String trimmed = account.trim();
-        // Extract only digits for standard masking
         String digits = trimmed.replaceAll("\\D", "");
 
-        // Industry standard: 10–12 digit accounts — show first 4, mask middle, show last 4
-        if (digits.length() >= 10 && digits.length() <= 12) {
+        if (trimmed.matches("^\\d{10,34}$")) {
             return digits.substring(0, 4) + " **** " + digits.substring(digits.length() - 4);
         }
 
-        // 8–9 digit legacy accounts — partial mask: first 3, ***, last 3
-        if (digits.length() >= 8) {
-            return digits.substring(0, 3) + " *** " + digits.substring(digits.length() - 3);
+        if (trimmed.matches("^[A-Za-z0-9-]{8,34}$")) {
+            return trimmed.substring(0, 4) + " **** " + trimmed.substring(trimmed.length() - 4);
         }
 
-        // Short or alpha-numeric legacy format — store as-is (clearly non-standard)
-        return trimmed + " (legacy)";
+        if (trimmed.length() >= 5) {
+            return trimmed.substring(0, 2) + "***" + trimmed.substring(trimmed.length() - 2);
+        }
+
+        return trimmed;
     }
 
     private boolean matchesAuditFilters(
@@ -607,16 +610,13 @@ public class BlockchainFallbackController {
         LocalDateTime occurredAt;
         try {
             occurredAt = LocalDateTime.parse(node.path("occurredAt").asText());
-        } catch (Exception ex) {
+        } catch (DateTimeParseException ex) {
             return false;
         }
 
         if (fromDate != null && occurredAt.isBefore(fromDate)) {
             return false;
         }
-        if (toDate != null && occurredAt.isAfter(toDate)) {
-            return false;
-        }
-        return true;
+        return toDate == null || !occurredAt.isAfter(toDate);
     }
 }

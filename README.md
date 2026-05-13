@@ -1,4 +1,4 @@
-# Blockchain Banking Security System (Civic Savings)
+# Civic Savings
 
 A production-grade, multi-tenant banking security platform that anchors
 financial transactions on a permissioned Hyperledger Fabric blockchain,

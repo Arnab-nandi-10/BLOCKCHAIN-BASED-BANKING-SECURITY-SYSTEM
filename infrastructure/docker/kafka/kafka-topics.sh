@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Blockchain Banking Security System — Kafka Topic Bootstrap Script
+# Civic Savings — Kafka Topic Bootstrap Script
 # =============================================================================
 # Creates all application topics with 3 partitions and replication-factor 1.
 # Intended to be run inside the Kafka container or from a host that has the

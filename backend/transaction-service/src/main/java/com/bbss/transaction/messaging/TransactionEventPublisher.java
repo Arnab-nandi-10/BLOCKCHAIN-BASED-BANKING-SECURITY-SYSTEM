@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -146,16 +147,18 @@ public class TransactionEventPublisher {
     }
 
     private void sendAsync(String topic, String key, Object payload) {
+        String nonNullTopic = Objects.requireNonNull(topic, "topic must not be null");
+        String nonNullKey = Objects.requireNonNull(key, "key must not be null");
         CompletableFuture<SendResult<String, Object>> future =
-                kafkaTemplate.send(topic, key, payload);
+            kafkaTemplate.send(nonNullTopic, nonNullKey, payload);
 
         future.whenComplete((result, ex) -> {
             if (ex != null) {
                 log.error("Failed to publish event to topic={} key={}: {}",
-                        topic, key, ex.getMessage(), ex);
+                nonNullTopic, nonNullKey, ex.getMessage(), ex);
             } else {
                 log.trace("Event delivered to topic={} partition={} offset={}",
-                        topic,
+                nonNullTopic,
                         result.getRecordMetadata().partition(),
                         result.getRecordMetadata().offset());
             }

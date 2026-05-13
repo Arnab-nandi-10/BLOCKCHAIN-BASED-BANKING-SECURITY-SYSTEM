@@ -17,6 +17,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/fallback")
@@ -29,6 +30,7 @@ public class FallbackController {
     }
 
     @RequestMapping
+    @SuppressWarnings("null")
     public Mono<Void> fallback(
             ServerWebExchange exchange,
             @RequestHeader(value = "X-Request-ID", required = false) String requestId) {
@@ -39,8 +41,11 @@ public class FallbackController {
             response.getHeaders().setContentType(MediaType.APPLICATION_JSON);
         }
 
-        DataBuffer buffer = response.bufferFactory().wrap(buildBody(requestId));
-        return response.writeWith(Mono.just(buffer));
+        byte[] body = buildBody(requestId);
+        DataBuffer buffer = Objects.requireNonNull(
+            response.bufferFactory().wrap(Objects.requireNonNull(body, "fallback response body must not be null")),
+            "fallback response buffer must not be null");
+        return response.writeWith(Mono.just(Objects.requireNonNull(buffer, "fallback response buffer must not be null")));
     }
 
     private byte[] buildBody(String requestId) {

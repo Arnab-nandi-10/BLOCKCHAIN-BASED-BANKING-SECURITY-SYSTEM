@@ -15,7 +15,7 @@
     <artifactId>api-gateway</artifactId>
     <packaging>jar</packaging>
     <name>api-gateway</name>
-    <description>API Gateway for Blockchain Banking Security System</description>
+    <description>API Gateway for Civic Savings</description>
 
     <properties>
         <!-- Spring's classpath scanner in this gateway module is not compatible

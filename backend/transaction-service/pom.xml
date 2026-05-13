@@ -13,7 +13,7 @@
 
     <artifactId>transaction-service</artifactId>
     <name>transaction-service</name>
-    <description>Transaction Service for Blockchain Banking Security System</description>
+    <description>Transaction Service for Civic Savings</description>
 
     <dependencies>
         <!-- Internal shared module -->

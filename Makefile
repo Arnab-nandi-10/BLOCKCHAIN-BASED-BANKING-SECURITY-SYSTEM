@@ -1,5 +1,5 @@
 # =============================================================================
-# Blockchain Banking Security System — Makefile
+# Civic Savings — Makefile
 # =============================================================================
 # Usage: make <target>
 # Run `make help` to see all available targets.
@@ -25,7 +25,7 @@ RESET := \033[0m
 # help
 # -----------------------------------------------------------------------------
 help: ## Print this help message
-	@printf "\n$(CYAN)Blockchain Banking Security System$(RESET)\n\n"
+	@printf "\n$(CYAN)Civic Savings$(RESET)\n\n"
 	@printf "Usage:  make $(CYAN)<target>$(RESET)\n\n"
 	@printf "Targets:\n"
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ { printf "  $(CYAN)%-22s$(RESET) %s\n", $$1, $$2 }' $(MAKEFILE_LIST)

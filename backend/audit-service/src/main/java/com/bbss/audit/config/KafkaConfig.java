@@ -21,6 +21,7 @@ import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
+import org.springframework.lang.NonNull;
 import org.springframework.util.backoff.ExponentialBackOff;
 
 import io.micrometer.core.instrument.MeterRegistry;
@@ -87,7 +88,7 @@ public class KafkaConfig {
     }
 
     @Bean
-    public KafkaTemplate<String, Object> kafkaTemplate(ProducerFactory<String, Object> producerFactory) {
+    public KafkaTemplate<String, Object> kafkaTemplate(@NonNull ProducerFactory<String, Object> producerFactory) {
         return new KafkaTemplate<>(producerFactory);
     }
 
@@ -136,8 +137,8 @@ public class KafkaConfig {
      */
     @Bean
     public CommonErrorHandler errorHandler(
-            KafkaTemplate<String, Object> kafkaTemplate,
-            MeterRegistry meterRegistry) {
+            @NonNull KafkaTemplate<String, Object> kafkaTemplate,
+            @NonNull MeterRegistry meterRegistry) {
         
         // Dead Letter Publishing Recoverer
         DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
@@ -188,8 +189,8 @@ public class KafkaConfig {
 
     @Bean
     public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory(
-            ConsumerFactory<String, Object> consumerFactory,
-            CommonErrorHandler errorHandler) {
+            @NonNull ConsumerFactory<String, Object> consumerFactory,
+            @NonNull CommonErrorHandler errorHandler) {
         ConcurrentKafkaListenerContainerFactory<String, Object> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);

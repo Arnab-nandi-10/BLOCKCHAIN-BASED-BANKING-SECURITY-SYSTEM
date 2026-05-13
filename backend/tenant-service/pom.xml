@@ -15,7 +15,7 @@
     <artifactId>tenant-service</artifactId>
     <packaging>jar</packaging>
     <name>tenant-service</name>
-    <description>Tenant Management Service for Blockchain Banking Security System</description>
+    <description>Tenant Management Service for Civic Savings</description>
 
     <dependencies>
         <!-- Shared Module -->

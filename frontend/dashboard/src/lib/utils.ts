@@ -43,31 +43,28 @@ export function truncate(str: string, start = 6, end = 4): string {
 }
 
 /**
- * Format a 10–12 digit account number for display.
- * Industry standard: show first 4 digits, mask middle with ****,
- * show last 4 digits. e.g. "4820019342" → "4820 **** 9342"
+ * Mask an account identifier for display without assuming a single banking format.
+ * Numeric accounts keep their first/last digits visible, while mixed identifiers
+ * retain their prefix/suffix so analysts can still recognise the source.
  */
 export function formatAccountNumber(account: string): string {
   if (!account) return '—'
-  const clean = account.replace(/\D/g, '')
+  const trimmed = account.trim()
+  const clean = trimmed.replace(/\D/g, '')
 
-  // Full 10–12 digit account — standard mask: first 4, ****, last 4
-  if (clean.length >= 10 && clean.length <= 12) {
+  if (/^\d{10,34}$/.test(trimmed)) {
     return `${clean.slice(0, 4)} **** ${clean.slice(-4)}`
   }
 
-  // Partial 8–9 digit account (legacy transitional) — show first 3, ***, last 3
-  if (clean.length >= 8) {
-    return `${clean.slice(0, 3)} *** ${clean.slice(-3)}`
+  if (/^[A-Za-z0-9-]{8,34}$/.test(trimmed)) {
+    return `${trimmed.slice(0, 4)} **** ${trimmed.slice(-4)}`
   }
 
-  // Pure numeric but too short (e.g. "999999") — legacy test data, show raw
-  if (clean.length > 0 && clean === account) {
-    return `${account} · legacy`
+  if (trimmed.length >= 5) {
+    return `${trimmed.slice(0, 2)}***${trimmed.slice(-2)}`
   }
 
-  // Alpha-numeric legacy format (e.g. "ACC-001") — show as-is with marker
-  return `${account} · legacy`
+  return trimmed
 }
 
 /**

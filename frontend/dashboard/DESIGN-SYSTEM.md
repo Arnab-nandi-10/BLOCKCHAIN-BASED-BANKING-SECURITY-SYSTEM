@@ -1,4 +1,4 @@
-# 🎨 Blockchain Banking Security System - Frontend Redesign
+# 🎨 Civic Savings - Frontend Redesign
 
 ## Modern SaaS UI/UX Design System
 

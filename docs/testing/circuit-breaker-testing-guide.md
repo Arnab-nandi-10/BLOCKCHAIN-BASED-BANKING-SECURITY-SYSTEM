@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide provides comprehensive testing procedures for the Resilience4j circuit breaker implementation across the Blockchain Banking Security System.
+This guide provides comprehensive testing procedures for the Resilience4j circuit breaker implementation across Civic Savings.
 
 ## Circuit Breaker Instances
 

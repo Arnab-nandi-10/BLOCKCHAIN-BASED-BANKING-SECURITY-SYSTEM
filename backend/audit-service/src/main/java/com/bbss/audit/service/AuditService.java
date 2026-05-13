@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
@@ -109,7 +110,7 @@ public class AuditService {
                 .correlationId(event.getCorrelationId())
                 .build();
 
-        AuditEntry saved = auditRepository.save(entry);
+        AuditEntry saved = auditRepository.save(Objects.requireNonNull(entry, "audit entry must not be null"));
         log.info("Audit entry persisted: auditId={} tenantId={} action={}",
                 saved.getAuditId(), saved.getTenantId(), saved.getAction());
 
@@ -160,8 +161,9 @@ public class AuditService {
             String tenantId,
             AuditQueryFilters filters,
             Pageable pageable) {
+        Pageable nonNullPageable = Objects.requireNonNull(pageable, "pageable must not be null");
         return auditRepository
-                .findAll(buildSpecification(tenantId, filters), pageable)
+            .findAll(buildSpecification(tenantId, filters), nonNullPageable)
                 .map(this::toAuditResponse);
     }
 

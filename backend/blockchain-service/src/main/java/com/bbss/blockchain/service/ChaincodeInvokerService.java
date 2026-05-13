@@ -25,9 +25,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -138,7 +140,7 @@ public class ChaincodeInvokerService {
                     verification.verificationStatus(),
                     true
             );
-        } catch (Exception ex) {
+        } catch (FabricGatewayService.BlockchainServiceException ex) {
             log.error("Failed to submit audit entry {} to Fabric: {}", event.getEventId(), ex.getMessage(), ex);
             throw new FabricGatewayService.BlockchainServiceException(
                     "Audit ledger submission failed: " + ex.getMessage(), ex);
@@ -174,7 +176,7 @@ public class ChaincodeInvokerService {
         String tenantId = null;
         try {
             tenantId = textValue(getAuditRecord(auditId), "tenantId");
-        } catch (Exception ex) {
+        } catch (EntityNotFoundException | FabricGatewayService.BlockchainServiceException ex) {
             log.debug("Could not resolve tenantId while publishing audit verification update for {}: {}",
                     auditId, ex.getMessage());
         }
@@ -314,7 +316,7 @@ public class ChaincodeInvokerService {
                     true,
                     "Transaction committed to Fabric successfully"
             );
-        } catch (Exception ex) {
+        } catch (RuntimeException ex) {
             return markPending(record, ex.getMessage());
         }
     }
@@ -380,7 +382,7 @@ public class ChaincodeInvokerService {
                     node.path("status").asText(null),
                     parseTimestamp(node.path("decisionTimestamp").asText(null))
             );
-        } catch (Exception ex) {
+        } catch (FabricGatewayService.BlockchainServiceException ex) {
             log.error("Fabric ledger query failed for txId={}: {}", txId, ex.getMessage());
             throw new EntityNotFoundException("Transaction not found on ledger: " + txId);
         }
@@ -410,7 +412,7 @@ public class ChaincodeInvokerService {
             );
             JsonNode node = fabricGatewayService.parseJsonResponse(response);
             return toVerificationResponse(node);
-        } catch (Exception ex) {
+        } catch (FabricGatewayService.BlockchainServiceException ex) {
             if (!suppressErrors) {
                 throw new FabricGatewayService.BlockchainServiceException(
                         "Failed to verify transaction integrity: " + ex.getMessage(), ex);
@@ -428,7 +430,7 @@ public class ChaincodeInvokerService {
             );
             JsonNode node = fabricGatewayService.parseJsonResponse(response);
             return toVerificationResponse(node);
-        } catch (Exception ex) {
+        } catch (FabricGatewayService.BlockchainServiceException ex) {
             if (!suppressErrors) {
                 throw new FabricGatewayService.BlockchainServiceException(
                         "Failed to verify audit integrity: " + ex.getMessage(), ex);
@@ -594,7 +596,7 @@ public class ChaincodeInvokerService {
         if (value instanceof String raw) {
             try {
                 return objectMapper.readTree(raw);
-            } catch (Exception ex) {
+            } catch (JsonProcessingException ex) {
                 ObjectNode node = objectMapper.createObjectNode();
                 node.put("rawPayload", raw);
                 return node;
@@ -622,10 +624,10 @@ public class ChaincodeInvokerService {
         }
         try {
             return LocalDateTime.parse(ts);
-        } catch (Exception ignored) {
+        } catch (DateTimeParseException ignored) {
             try {
                 return OffsetDateTime.parse(ts, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toLocalDateTime();
-            } catch (Exception ex) {
+            } catch (DateTimeParseException ex) {
                 log.warn("Could not parse ledger timestamp '{}': {}", ts, ex.getMessage());
                 return null;
             }
@@ -676,10 +678,21 @@ public class ChaincodeInvokerService {
             return null;
         }
         String trimmed = account.trim();
-        if (trimmed.length() <= 4) {
-            return "*".repeat(trimmed.length());
+        String digits = trimmed.replaceAll("\\D", "");
+
+        if (trimmed.matches("^\\d{10,34}$")) {
+            return digits.substring(0, 4) + " **** " + digits.substring(digits.length() - 4);
         }
-        return "*".repeat(trimmed.length() - 4) + trimmed.substring(trimmed.length() - 4);
+
+        if (trimmed.matches("^[A-Za-z0-9-]{8,34}$")) {
+            return trimmed.substring(0, 4) + " **** " + trimmed.substring(trimmed.length() - 4);
+        }
+
+        if (trimmed.length() >= 5) {
+            return trimmed.substring(0, 2) + "***" + trimmed.substring(trimmed.length() - 2);
+        }
+
+        return "*".repeat(trimmed.length());
     }
 
     private String hashValue(String value) {
@@ -690,7 +703,7 @@ public class ChaincodeInvokerService {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hash = digest.digest(value.trim().getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(hash);
-        } catch (Exception ex) {
+        } catch (NoSuchAlgorithmException ex) {
             throw new FabricGatewayService.BlockchainServiceException(
                     "Failed to hash sensitive value: " + ex.getMessage(), ex);
         }
@@ -735,9 +748,6 @@ public class ChaincodeInvokerService {
         if (fromDate != null && occurredAt.isBefore(fromDate)) {
             return false;
         }
-        if (toDate != null && occurredAt.isAfter(toDate)) {
-            return false;
-        }
-        return true;
+        return toDate == null || !occurredAt.isAfter(toDate);
     }
 }

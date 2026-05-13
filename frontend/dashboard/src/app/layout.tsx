@@ -1,14 +1,14 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Providers } from './providers'
+import { APP_DESCRIPTION, APP_NAME, APP_SUBTITLE } from '@/lib/app-config'
 
 export const metadata: Metadata = {
   title: {
-    default: 'Civic Savings — Blockchain Banking Security',
-    template: '%s | Civic Savings',
+    default: `${APP_NAME} — ${APP_SUBTITLE}`,
+    template: `%s | ${APP_NAME}`,
   },
-  description:
-    'Enterprise-grade blockchain-backed banking security platform with real-time fraud detection and immutable audit trails.',
+  description: APP_DESCRIPTION,
   robots: { index: false, follow: false },
 }
 

@@ -66,6 +66,7 @@ public class BlockchainClientAdapter {
      * @param throwable exception that triggered fallback
      * @return {@code null} to signal unavailability
      */
+        @SuppressWarnings("unused")
     private BlockchainServiceClient.BlockchainAuditResponse submitAuditFallback(
             BlockchainServiceClient.BlockchainAuditRequest request, Throwable throwable) {
         
@@ -108,6 +109,7 @@ public class BlockchainClientAdapter {
      * @param throwable exception that triggered fallback
      * @return {@code null} to signal unavailability
      */
+        @SuppressWarnings("unused")
     private BlockchainServiceClient.BlockchainTransactionResponse getTransactionFallback(
             String txId, Throwable throwable) {
         
@@ -118,7 +120,8 @@ public class BlockchainClientAdapter {
         return null;
     }
 
-    private BlockchainServiceClient.BlockchainVerificationResponse verifyAuditFallback(
+        @SuppressWarnings("unused")
+        private BlockchainServiceClient.BlockchainVerificationResponse verifyAuditFallback(
             String auditId, Throwable throwable) {
 
         log.warn("Circuit breaker OPEN or bulkhead FULL for verifyAudit: auditId={} reason={}",

@@ -22,6 +22,7 @@ import {
 import { api } from '@/lib/api-client'
 import { useAuthStore } from '@/store/auth-store'
 import { cn } from '@/lib/utils'
+import { APP_NAME } from '@/lib/app-config'
 
 function Field({
   id,
@@ -136,7 +137,7 @@ export default function RegisterPage() {
             <ShieldCheck size={24} className="text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Create your Civic Savings account</h1>
+            <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Create your {APP_NAME} account</h1>
             <p className="mt-1 text-sm" style={{ color: 'var(--text-muted)' }}>Register a new admin workspace and start managing secure banking flows.</p>
           </div>
         </div>

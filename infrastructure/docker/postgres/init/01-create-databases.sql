@@ -1,5 +1,5 @@
 -- =============================================================================
--- Blockchain Banking Security System — PostgreSQL Initialization
+-- Civic Savings — PostgreSQL Initialization
 -- Creates all per-service databases on first container start.
 -- =============================================================================
 

@@ -116,7 +116,7 @@ springdoc:
     operationsSorter: method
   info:
     title: Auth Service API
-    description: Authentication and Authorization Service for Blockchain Banking Security System
+    description: Authentication and Authorization Service for Civic Savings
     version: 1.0.0
 
 logging:

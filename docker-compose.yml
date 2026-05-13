@@ -1,6 +1,6 @@
 
 # =============================================================================
-# Blockchain Banking Security System — Docker Compose
+# Civic Savings — Docker Compose
 # =============================================================================
 
 networks:
@@ -126,6 +126,7 @@ services:
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.entry        --replication-factor 1 --partitions 3
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.committed    --replication-factor 1 --partitions 3
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tenant.provisioned --replication-factor 1 --partitions 3
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tx.ledger.commit.request --replication-factor 1 --partitions 3
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic block.committed    --replication-factor 1 --partitions 3
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic block.commit.failed --replication-factor 1 --partitions 3
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic block.verification.updated --replication-factor 1 --partitions 3
@@ -136,8 +137,10 @@ services:
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic audit.entry.dlt    --replication-factor 1 --partitions 1 --config retention.ms=604800000
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tx.verified.dlt    --replication-factor 1 --partitions 1 --config retention.ms=604800000
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tx.blocked.dlt     --replication-factor 1 --partitions 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tx.ledger.commit.request.dlt --replication-factor 1 --partitions 1 --config retention.ms=604800000
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic block.committed.dlt --replication-factor 1 --partitions 1 --config retention.ms=604800000
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic block.commit.failed.dlt --replication-factor 1 --partitions 1 --config retention.ms=604800000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic block.verification.updated.dlt --replication-factor 1 --partitions 1 --config retention.ms=604800000
       
       echo 'All Kafka topics (including DLTs) created successfully.'
       kafka-topics --bootstrap-server kafka:9092 --list

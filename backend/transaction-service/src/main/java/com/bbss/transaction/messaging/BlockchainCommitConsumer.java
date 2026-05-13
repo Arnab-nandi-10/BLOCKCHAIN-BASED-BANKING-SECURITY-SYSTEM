@@ -2,11 +2,9 @@ package com.bbss.transaction.messaging;
 
 import java.util.Map;
 
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
-import org.springframework.kafka.support.KafkaHeaders;
-import org.springframework.messaging.handler.annotation.Header;
-import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 
 import com.bbss.transaction.service.TransactionService;
@@ -35,15 +33,17 @@ public class BlockchainCommitConsumer {
                     TOPIC_BLOCK_VERIFICATION_UPDATED
             },
             groupId = "transaction-service",
-            containerFactory = "kafkaListenerContainerFactory"
+            containerFactory = "blockchainKafkaListenerContainerFactory"
     )
     public void consume(
-            @Payload Map<String, Object> event,
-            @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,
-            @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
-            @Header(KafkaHeaders.OFFSET) long offset,
+            ConsumerRecord<String, Object> record,
             Acknowledgment acknowledgment) {
 
+        String topic = record.topic();
+        int partition = record.partition();
+        long offset = record.offset();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> event = (Map<String, Object>) record.value();
         String transactionId = stringValue(event.get("transactionId"));
         log.info("Received {} event for transactionId={} partition={} offset={}",
                 topic, transactionId, partition, offset);

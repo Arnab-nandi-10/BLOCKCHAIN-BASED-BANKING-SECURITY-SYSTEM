@@ -1,7 +1,6 @@
 package com.bbss.blockchain.config;
 
 import io.micrometer.core.instrument.MeterRegistry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -41,7 +40,6 @@ import java.util.Map;
  * @see org.springframework.util.backoff.ExponentialBackOff
  */
 @Configuration
-@RequiredArgsConstructor
 @Slf4j
 public class KafkaConfig {
 
@@ -50,8 +48,6 @@ public class KafkaConfig {
 
     @Value("${spring.kafka.consumer.group-id:blockchain-service}")
     private String groupId;
-
-    private final MeterRegistry meterRegistry;
 
     // -------------------------------------------------------------------------
     // Producer Configuration

@@ -762,28 +762,26 @@ export function TransactionActions() {
             ) : null}
 
             <div className="grid gap-4 md:grid-cols-2">
-              <Field label="From Account" required hint="10–12 digit account number">
+              <Field label="From Account" required hint="Account identifier from your banking or ledger system">
                 <input
                   type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]{10,12}"
-                  maxLength={12}
+                  inputMode="text"
+                  maxLength={34}
                   value={createForm.fromAccount}
                   onChange={(event) => setCreateForm((prev) => ({ ...prev, fromAccount: event.target.value }))}
-                  placeholder="4820019342"
+                  placeholder="ACC-001234 or 4820019342"
                   className="input-base"
                 />
               </Field>
 
-              <Field label="To Account" required hint="10–12 digit account number">
+              <Field label="To Account" required hint="Destination account identifier">
                 <input
                   type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]{10,12}"
-                  maxLength={12}
+                  inputMode="text"
+                  maxLength={34}
                   value={createForm.toAccount}
                   onChange={(event) => setCreateForm((prev) => ({ ...prev, toAccount: event.target.value }))}
-                  placeholder="7631004589"
+                  placeholder="ACC-009876 or 7631004589"
                   className="input-base"
                 />
               </Field>

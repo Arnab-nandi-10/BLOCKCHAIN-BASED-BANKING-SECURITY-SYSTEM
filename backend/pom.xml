@@ -12,9 +12,9 @@
     <artifactId>blockchain-banking-security</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <packaging>pom</packaging>
-    <name>Blockchain Banking Security System</name>
+    <name>Civic Savings</name>
     <description>
-        Enterprise-grade, multi-tenant blockchain banking security platform built on
+        Enterprise-grade, multi-tenant banking security platform built on
         Spring Boot 3.3.6 and Spring Cloud 2023.0.3.
     </description>
 

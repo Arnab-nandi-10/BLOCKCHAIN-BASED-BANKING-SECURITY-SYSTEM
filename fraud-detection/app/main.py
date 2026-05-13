@@ -113,7 +113,7 @@ app = FastAPI(
     version=settings.APP_VERSION,
     description=(
         "Real-time ML-powered fraud detection microservice for the "
-        "Blockchain Banking Security System."
+        "Civic Savings."
     ),
     docs_url="/docs",
     redoc_url="/redoc",

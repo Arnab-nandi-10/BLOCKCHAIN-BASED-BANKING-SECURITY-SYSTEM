@@ -14,6 +14,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { ThemeToggle } from '@/components/ui/theme-toggle'
+import { APP_NAME, APP_SUBTITLE, formatAppVersion } from '@/lib/app-config'
 
 function FadeIn({
   children,
@@ -102,10 +103,10 @@ export default function LandingPage() {
               <ShieldCheck size={14} className="text-white" />
             </div>
             <span className="font-bold text-sm tracking-tight" style={{ color: 'var(--text-primary)' }}>
-              Civic Savings
+              {APP_NAME}
             </span>
             <span className="hidden text-xs sm:inline" style={{ color: 'var(--text-muted)' }}>
-              Blockchain Banking Security
+              {APP_SUBTITLE}
             </span>
           </div>
 
@@ -260,7 +261,7 @@ export default function LandingPage() {
             </p>
           </div>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            Civic Savings v1.0.0 · Blockchain Banking Security System
+            {APP_NAME} {formatAppVersion()} · {APP_SUBTITLE}
           </p>
         </div>
       </footer>

@@ -1,5 +1,5 @@
 # =============================================================================
-# Blockchain Banking Security System — Prometheus Configuration
+# Civic Savings — Prometheus Configuration
 # =============================================================================
 # All Spring Boot services expose metrics via the Micrometer Prometheus
 # registry at /actuator/prometheus.

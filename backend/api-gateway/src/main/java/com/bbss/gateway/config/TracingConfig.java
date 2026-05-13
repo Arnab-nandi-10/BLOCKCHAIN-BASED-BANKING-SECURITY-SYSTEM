@@ -4,15 +4,14 @@ import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationHandler;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
-import io.micrometer.tracing.handler.TracingObservationHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.server.ServerWebExchange;
-import reactor.core.publisher.Mono;
 
 /**
  * Distributed Tracing Configuration for API Gateway.
@@ -62,6 +61,7 @@ public class TracingConfig {
             
             if (currentSpan != null) {
                 ServerHttpRequest request = exchange.getRequest();
+                HttpMethod method = request.getMethod();
                 
                 // Extract tenant ID from header (set by JWT authentication filter)
                 String tenantId = request.getHeaders().getFirst("X-Tenant-Id");
@@ -96,7 +96,9 @@ public class TracingConfig {
                 }
                 
                 // Tag with HTTP method and path
-                currentSpan.tag("http.method", request.getMethod().name());
+                if (method != null) {
+                    currentSpan.tag("http.method", method.name());
+                }
                 currentSpan.tag("http.path", request.getPath().value());
                 
                 log.debug("Enhanced trace with business context - traceId: {}, tenantId: {}, userId: {}, path: {}", 
@@ -168,8 +170,12 @@ public class TracingConfig {
         }
         
         // Last resort: Remote address from connection (might be proxy IP in production)
-        if (request.getRemoteAddress() != null) {
-            return request.getRemoteAddress().getAddress().getHostAddress();
+        var remoteAddress = request.getRemoteAddress();
+        if (remoteAddress != null) {
+            var address = remoteAddress.getAddress();
+            if (address != null) {
+                return address.getHostAddress();
+            }
         }
         
         return null;

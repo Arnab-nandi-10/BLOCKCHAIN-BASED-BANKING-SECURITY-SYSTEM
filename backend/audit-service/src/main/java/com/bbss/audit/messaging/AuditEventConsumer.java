@@ -5,6 +5,7 @@ import com.bbss.shared.events.AuditEvent;
 import com.bbss.shared.events.FraudAlertEvent;
 import com.bbss.shared.events.TenantEvent;
 import com.bbss.shared.events.TransactionEvent;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -300,7 +301,7 @@ public class AuditEventConsumer {
         if (value instanceof String json) {
             try {
                 return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
-            } catch (Exception e) {
+            } catch (JsonProcessingException e) {
                 log.warn("Could not parse Kafka record value as JSON map: {}", e.getMessage());
                 return Map.of();
             }

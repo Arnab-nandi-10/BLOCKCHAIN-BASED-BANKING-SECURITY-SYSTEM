@@ -6,12 +6,10 @@ import com.bbss.shared.events.TransactionEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
-import org.springframework.kafka.support.KafkaHeaders;
-import org.springframework.messaging.handler.annotation.Header;
-import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 
 /**
@@ -32,14 +30,12 @@ public class TransactionCommitRequestConsumer {
             containerFactory = "kafkaListenerContainerFactory"
     )
     public void consume(
-            @Payload Object eventPayload,
-            @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
-            @Header(KafkaHeaders.OFFSET) long offset,
+            ConsumerRecord<String, Object> record,
             Acknowledgment acknowledgment) {
 
-        TransactionEvent event = objectMapper.convertValue(eventPayload, TransactionEvent.class);
+        TransactionEvent event = objectMapper.convertValue(record.value(), TransactionEvent.class);
         log.info("Received ledger commit request: txId={} status={} partition={} offset={}",
-                event.getTransactionId(), event.getStatus(), partition, offset);
+                event.getTransactionId(), event.getStatus(), record.partition(), record.offset());
 
         try {
             BlockchainSubmitRequest request = new BlockchainSubmitRequest(

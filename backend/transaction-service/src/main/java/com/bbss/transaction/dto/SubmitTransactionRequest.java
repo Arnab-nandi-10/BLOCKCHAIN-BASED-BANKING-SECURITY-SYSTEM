@@ -13,12 +13,13 @@ import java.util.Map;
 /**
  * Request payload for submitting a new transaction.
  *
- * <p>Account numbers follow the banking industry standard of 10–12 digit numeric
- * identifiers (compatible with ACH routing, SWIFT BBAN, and most core-banking
- * account schemas).
+ * <p>Account identifiers vary across banks and core systems. Some tenants use
+ * numeric accounts, others use short internal aliases, and some use
+ * alphanumeric IDs with separators. The API therefore validates a general
+ * account identifier contract instead of hard-coding a single numeric format.
  *
- * @param fromAccount account originating the transaction (10–12 digits)
- * @param toAccount   destination account (10–12 digits)
+ * @param fromAccount account originating the transaction
+ * @param toAccount   destination account
  * @param amount      transaction amount; must be positive
  * @param currency    ISO 4217 three-letter currency code (e.g. "USD")
  * @param type        transaction category
@@ -27,16 +28,18 @@ import java.util.Map;
 public record SubmitTransactionRequest(
 
         @NotBlank(message = "fromAccount must not be blank")
+        @Size(min = 4, max = 34, message = "fromAccount must be between 4 and 34 characters")
         @Pattern(
-            regexp = "^[0-9]{10,12}$",
-            message = "fromAccount must be a 10–12 digit numeric account number"
+            regexp = "^[A-Za-z0-9][A-Za-z0-9-]{3,33}$",
+            message = "fromAccount may contain letters, numbers, and hyphens only"
         )
         String fromAccount,
 
         @NotBlank(message = "toAccount must not be blank")
+        @Size(min = 4, max = 34, message = "toAccount must be between 4 and 34 characters")
         @Pattern(
-            regexp = "^[0-9]{10,12}$",
-            message = "toAccount must be a 10–12 digit numeric account number"
+            regexp = "^[A-Za-z0-9][A-Za-z0-9-]{3,33}$",
+            message = "toAccount may contain letters, numbers, and hyphens only"
         )
         String toAccount,
 
@@ -53,4 +56,3 @@ public record SubmitTransactionRequest(
 
         Map<String, String> metadata
 ) {}
-
